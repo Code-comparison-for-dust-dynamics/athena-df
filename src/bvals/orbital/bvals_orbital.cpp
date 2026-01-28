@@ -2737,7 +2737,7 @@ void OrbitalBoundaryCommunication::LoadDustFluidsBufferToFiner(Real *buf, int &p
         ku = pmb->ke+1;
       } else if (nb<8) {
         kl = pmb->ks-1;
-        ku = pmb->ke+size_cc_send[0][2+nb-4]-onx-1;
+        ku = pmb->ke+size_cc_send[1][2+nb-4]-onx-1;
       } else {
         std::stringstream msg;
         msg << "### FATAL ERROR in OrbitalBoundaryCommunication"

@@ -16,6 +16,7 @@
 #include <iostream>
 
 // Athena++ headers
+#include "../athena.hpp"
 #include "../defs.hpp"
 #include "../globals.hpp"
 #include "utils.hpp"

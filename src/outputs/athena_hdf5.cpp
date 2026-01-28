@@ -358,6 +358,7 @@ void ATHDF5Output::WriteOutputFile(Mesh *pm, ParameterInput *pin, bool flag) {
 
       // Load location information
       levels_mesh[nba] = pmb->loc.level - pm->root_level;
+      //std::cout << "P[" << Globals::my_rank << "]: lev=" << levels_mesh[nba] << ", loc.lev=" << pmb->loc.level << ", root_lev=" << pm->root_level << std::endl;
       locations_mesh[nba*3 + 0] = pmb->loc.lx1;
       locations_mesh[nba*3 + 1] = pmb->loc.lx2;
       locations_mesh[nba*3 + 2] = pmb->loc.lx3;
@@ -749,14 +750,17 @@ void ATHDF5Output::WriteOutputFile(Mesh *pm, ParameterInput *pin, bool flag) {
 
   // Use collective MPI calls if applicable
   property_list = H5Pcreate(H5P_DATASET_XFER);
+  // some clusters have aggregator issues for small dataset, need a fix
+  hid_t dxpl_ind = H5Pcreate(H5P_DATASET_XFER);
 #ifdef MPI_PARALLEL
   H5Pset_dxpl_mpio(property_list, H5FD_MPIO_COLLECTIVE);
+  H5Pset_dxpl_mpio(dxpl_ind, H5FD_MPIO_INDEPENDENT);
 #endif
 
   // dump all the data
   // Write refinement level and logical location
   H5Dwrite(dataset_levels, H5T_NATIVE_INT, memspace_blocks, filespace_blocks,
-           property_list, levels_mesh);
+           dxpl_ind, levels_mesh);
   H5Dwrite(dataset_locations, H5T_NATIVE_LONG, memspace_blocks_3, filespace_blocks_3,
            property_list, locations_mesh);
 
@@ -783,6 +787,7 @@ void ATHDF5Output::WriteOutputFile(Mesh *pm, ParameterInput *pin, bool flag) {
 
   // Close property list
   H5Pclose(property_list);
+  H5Pclose(dxpl_ind);
 
   // Close dataspaces for describing memory
   H5Sclose(memspace_blocks);

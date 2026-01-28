@@ -25,8 +25,8 @@
 
 void DustGasDrag::ExplicitFeedback(const int stage,
       const Real dt, const AthenaArray<Real> &stopping_time,
-      const AthenaArray<Real> &w, const AthenaArray<Real> &prim_df,
-      AthenaArray<Real> &u, AthenaArray<Real> &cons_df) {
+      const AthenaArray<Real> &w, const AthenaArray<Real> &w_df,
+      AthenaArray<Real> &u, AthenaArray<Real> &u_df) {
 
   int is = pmb_->is; int js = pmb_->js; int ks = pmb_->ks;
   int ie = pmb_->ie; int je = pmb_->je; int ke = pmb_->ke;
@@ -63,10 +63,10 @@ void DustGasDrag::ExplicitFeedback(const int stage,
 #pragma omp simd
         for (int i=is; i<=ie; ++i) {
           // Alias the primitives of dust at current stage
-          const Real &dust_rho  = prim_df(rho_id, k, j, i);
-          const Real &dust_vel1 = prim_df(v1_id,  k, j, i);
-          const Real &dust_vel2 = prim_df(v2_id,  k, j, i);
-          const Real &dust_vel3 = prim_df(v3_id,  k, j, i);
+          const Real &dust_rho  = w_df(rho_id, k, j, i);
+          const Real &dust_vel1 = w_df(v1_id,  k, j, i);
+          const Real &dust_vel2 = w_df(v2_id,  k, j, i);
+          const Real &dust_vel3 = w_df(v3_id,  k, j, i);
 
           alpha(n, i)   = 1.0/(stopping_time(dust_id, k, j, i) + TINY_NUMBER);
           epsilon(n, i) = dust_rho*inv_gas_rho(i);
@@ -88,10 +88,10 @@ void DustGasDrag::ExplicitFeedback(const int stage,
           delta_mom3(n, i) = force_x3(n, i)*dt;
 
           // Alias the conserves of dust at current stage
-          Real &dust_dens = cons_df(rho_id, k, j, i);
-          Real &dust_mom1 = cons_df(v1_id,  k, j, i);
-          Real &dust_mom2 = cons_df(v2_id,  k, j, i);
-          Real &dust_mom3 = cons_df(v3_id,  k, j, i);
+          Real &dust_dens = u_df(rho_id, k, j, i);
+          Real &dust_mom1 = u_df(v1_id,  k, j, i);
+          Real &dust_mom2 = u_df(v2_id,  k, j, i);
+          Real &dust_mom3 = u_df(v3_id,  k, j, i);
 
           // Calculate the dust velocity before drags
           Real inv_dust_dens     = 0.0;
@@ -183,8 +183,8 @@ void DustGasDrag::ExplicitFeedback(const int stage,
 
 void DustGasDrag::ExplicitNoFeedback(const int stage,
       const Real dt, const AthenaArray<Real> &stopping_time,
-      const AthenaArray<Real> &w, const AthenaArray<Real> &prim_df,
-      const AthenaArray<Real> &u, AthenaArray<Real> &cons_df) {
+      const AthenaArray<Real> &w, const AthenaArray<Real> &w_df,
+      const AthenaArray<Real> &u, AthenaArray<Real> &u_df) {
 
   int is = pmb_->is; int js = pmb_->js; int ks = pmb_->ks;
   int ie = pmb_->ie; int je = pmb_->je; int ke = pmb_->ke;
@@ -218,10 +218,10 @@ void DustGasDrag::ExplicitNoFeedback(const int stage,
 #pragma omp simd
         for (int i=is; i<=ie; ++i) {
           // Alias the primitives of dust at current stage
-          const Real &dust_rho  = prim_df(rho_id, k, j, i);
-          const Real &dust_vel1 = prim_df(v1_id,  k, j, i);
-          const Real &dust_vel2 = prim_df(v2_id,  k, j, i);
-          const Real &dust_vel3 = prim_df(v3_id,  k, j, i);
+          const Real &dust_rho  = w_df(rho_id, k, j, i);
+          const Real &dust_vel1 = w_df(v1_id,  k, j, i);
+          const Real &dust_vel2 = w_df(v2_id,  k, j, i);
+          const Real &dust_vel3 = w_df(v3_id,  k, j, i);
 
           alpha(n, i)   = 1.0/(stopping_time(dust_id, k, j, i) + TINY_NUMBER);
           epsilon(n, i) = dust_rho*inv_gas_rho(i);
@@ -239,9 +239,9 @@ void DustGasDrag::ExplicitNoFeedback(const int stage,
           delta_mom3(n, i) = force_x3(n, i)*dt;
 
           // Alias the conserves of dust at current stage
-          Real &dust_mom1 = cons_df(v1_id, k, j, i);
-          Real &dust_mom2 = cons_df(v2_id, k, j, i);
-          Real &dust_mom3 = cons_df(v3_id, k, j, i);
+          Real &dust_mom1 = u_df(v1_id, k, j, i);
+          Real &dust_mom2 = u_df(v2_id, k, j, i);
+          Real &dust_mom3 = u_df(v3_id, k, j, i);
 
           // Add the delta momentum caused by drags on dust conserves
           dust_mom1 += delta_mom1(n, i);
@@ -257,11 +257,10 @@ void DustGasDrag::ExplicitNoFeedback(const int stage,
 
 void DustGasDrag::RK2ExplicitFeedback(const int stage,
       const Real dt, const AthenaArray<Real> &stopping_time,
-      const AthenaArray<Real> &w, const AthenaArray<Real> &prim_df,
-      AthenaArray<Real> &u, AthenaArray<Real> &cons_df) {
+      const AthenaArray<Real> &w, const AthenaArray<Real> &w_df,
+      AthenaArray<Real> &u, AthenaArray<Real> &u_df) {
 
-  const AthenaArray<Real> &w_n       = pmy_hydro_->w_n;
-  const AthenaArray<Real> &prim_df_n = pmy_dustfluids_->df_w_n;
+  const AthenaArray<Real> &w_n = pmy_hydro_->w_n;
 
   int is = pmb_->is; int js = pmb_->js; int ks = pmb_->ks;
   int ie = pmb_->ie; int je = pmb_->je; int ke = pmb_->ke;
@@ -308,10 +307,10 @@ void DustGasDrag::RK2ExplicitFeedback(const int stage,
 #pragma omp simd
           for (int i=is; i<=ie; ++i) {
             // Alias the primitives of dust at current stage
-            const Real &dust_rho  = prim_df(rho_id, k, j, i);
-            const Real &dust_vel1 = prim_df(v1_id,  k, j, i);
-            const Real &dust_vel2 = prim_df(v2_id,  k, j, i);
-            const Real &dust_vel3 = prim_df(v3_id,  k, j, i);
+            const Real &dust_rho  = w_df(rho_id, k, j, i);
+            const Real &dust_vel1 = w_df(v1_id,  k, j, i);
+            const Real &dust_vel2 = w_df(v2_id,  k, j, i);
+            const Real &dust_vel3 = w_df(v3_id,  k, j, i);
 
             alpha(n, i)   = 1.0/(stopping_time(dust_id, k, j, i) + TINY_NUMBER);
             epsilon(n, i) = dust_rho*inv_gas_rho(i);
@@ -333,10 +332,10 @@ void DustGasDrag::RK2ExplicitFeedback(const int stage,
             delta_mom3(n, i) = force_x3(n, i)*dt;
 
             // Alias the conserves of dust at current stage
-            Real &dust_dens = cons_df(rho_id, k, j, i);
-            Real &dust_mom1 = cons_df(v1_id,  k, j, i);
-            Real &dust_mom2 = cons_df(v2_id,  k, j, i);
-            Real &dust_mom3 = cons_df(v3_id,  k, j, i);
+            Real &dust_dens = u_df(rho_id, k, j, i);
+            Real &dust_mom1 = u_df(v1_id,  k, j, i);
+            Real &dust_mom2 = u_df(v2_id,  k, j, i);
+            Real &dust_mom3 = u_df(v3_id,  k, j, i);
 
             // Calculate the dust velocity before drags
             Real inv_dust_dens     = 0.0;
@@ -467,10 +466,10 @@ void DustGasDrag::RK2ExplicitFeedback(const int stage,
 #pragma omp simd
           for (int i=is; i<=ie; ++i) {
             // Alias the primitives of dust at current stage
-            const Real &dust_rho  = prim_df(rho_id, k, j, i);
-            const Real &dust_vel1 = prim_df(v1_id,  k, j, i);
-            const Real &dust_vel2 = prim_df(v2_id,  k, j, i);
-            const Real &dust_vel3 = prim_df(v3_id,  k, j, i);
+            const Real &dust_rho  = w_df(rho_id, k, j, i);
+            const Real &dust_vel1 = w_df(v1_id,  k, j, i);
+            const Real &dust_vel2 = w_df(v2_id,  k, j, i);
+            const Real &dust_vel3 = w_df(v3_id,  k, j, i);
 
             alpha(n, i)   = 1.0/(stopping_time(dust_id, k, j, i) + TINY_NUMBER);
             epsilon(n, i) = dust_rho*inv_gas_rho(i);
@@ -492,10 +491,10 @@ void DustGasDrag::RK2ExplicitFeedback(const int stage,
             delta_mom3(n, i) = force_x3(n, i)*dt;
 
             // Alias the conserves of dust at current stage
-            Real &dust_dens = cons_df(rho_id, k, j, i);
-            Real &dust_mom1 = cons_df(v1_id,  k, j, i);
-            Real &dust_mom2 = cons_df(v2_id,  k, j, i);
-            Real &dust_mom3 = cons_df(v3_id,  k, j, i);
+            Real &dust_dens = u_df(rho_id, k, j, i);
+            Real &dust_mom1 = u_df(v1_id,  k, j, i);
+            Real &dust_mom2 = u_df(v2_id,  k, j, i);
+            Real &dust_mom3 = u_df(v3_id,  k, j, i);
 
             // Add the delta momentum caused by drags on dust conserves
             dust_mom1 += delta_mom1(n, i);

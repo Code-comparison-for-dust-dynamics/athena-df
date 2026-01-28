@@ -22,4 +22,5 @@ namespace Globals {
 // all of these global variables are set at the start of main():
 int my_rank;         // MPI rank of this process
 int nranks;          // total number of MPI ranks
+int local_ndustfluids_inte;  // tweak ndustfluids in src/task_list/time_integrator.cpp
 }

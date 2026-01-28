@@ -10,6 +10,7 @@
 
 namespace Globals {
 extern int my_rank, nranks;
+extern int local_ndustfluids_inte;
 }
 
 #endif // GLOBALS_HPP_

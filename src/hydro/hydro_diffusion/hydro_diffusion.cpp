@@ -303,14 +303,16 @@ void HydroDiffusion::NewDiffusionDt(Real &dt_vis, Real &dt_cnd) {
         len(i) = (f3) ? std::min(len(i), dx3(i)) : len(i);
       }
       if ((alpha_disk_model) || (nu_iso > 0.0) || (nu_aniso > 0.0)) {
-        for (int i=il; i<=iu; ++i)
+        for (int i=il; i<=iu; ++i) {
           dt_vis = std::min(dt_vis, static_cast<Real>(
               SQR(len(i))*fac/(nu_t(i) + TINY_NUMBER)));
+        }
       }
       if ((kappa_iso > 0.0) || (kappa_aniso > 0.0)) {
-        for (int i=il; i<=iu; ++i)
+        for (int i=il; i<=iu; ++i) {
           dt_cnd = std::min(dt_cnd, static_cast<Real>(
               SQR(len(i))*fac/(kappa_t(i) + TINY_NUMBER)));
+        }
       }
     }
   }

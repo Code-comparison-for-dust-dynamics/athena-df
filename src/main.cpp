@@ -72,6 +72,7 @@ int main(int argc, char *argv[]) {
   int mesh_flag = 0;  // set to <nproc> if -m <nproc> argument is on cmdline
   int wtlim = 0;
   std::uint64_t mbcnt = 0;
+  double t00; // RL: added to measure wall-time
 
   //--- Step 1. --------------------------------------------------------------------------
   // Initialize MPI environment, if necessary
@@ -446,10 +447,16 @@ int main(int argc, char *argv[]) {
   // For performance, there is no error handler protecting this step (except outputs)
 
   if (Globals::my_rank == 0) {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t t_c = std::chrono::system_clock::to_time_t(now);
+    std::cout << "Current Time: " << std::ctime(&t_c); // RL: get rid of '\n'
     std::cout << "\nSetup complete, entering main loop...\n" << std::endl;
   }
 
   clock_t tstart = clock();
+  pmesh->last_cycle_t = pmesh->GetCurrentTime();
+  pmesh->current_cycle_t = pmesh->last_cycle_t;
+  t00 = pmesh->last_cycle_t;
 #ifdef OPENMP_PARALLEL
   double omp_start_time = omp_get_wtime();
 #endif
@@ -530,6 +537,9 @@ int main(int argc, char *argv[]) {
     }
 
     pmesh->UserWorkInLoop();
+    // RL: Note that pmesh->NewTimeStep() simply finds the minimum min_dt in already-computed min_dt in all MeshBlocks.
+    //     The real dt calculations NewBlockTimeStep() occur at the end of TaskList, after MeshBlock:UserWorkInLoop, but before Mesh:UserWorkInLoop! 
+    //     Therefore, one need to use MeshBlock:UserWorkInLoop to modify any quantities that could affect dt.
 
     pmesh->ncycle++;
     pmesh->time += pmesh->dt;
@@ -650,6 +660,11 @@ int main(int argc, char *argv[]) {
     std::cout << std::endl << "omp wtime used = " << omp_time << std::endl;
     std::cout << "zone-cycles/omp_wsecond = " << zc_omps << std::endl;
 #endif
+
+    std::cout << "wall time used  = " << pmesh->GetCurrentTime() - t00 << std::endl;
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t t_c = std::chrono::system_clock::to_time_t(now);
+    std::cout << "\nCurrent Time: " << std::ctime(&t_c) << std::endl;
   }
 
   delete pinput;

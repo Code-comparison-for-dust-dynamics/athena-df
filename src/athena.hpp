@@ -13,6 +13,7 @@
 // C++ headers
 #include <cmath>
 #include <cstdint>  // std::int64_t
+#include <chrono>   // RL: added for time info
 
 // Athena++ headers
 #include "athena_arrays.hpp"

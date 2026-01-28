@@ -2338,9 +2338,12 @@ void Mesh::OutputCycleDiagnostics() {
   const int ratio_precision = 3;
   if (ncycle_out != 0) {
     if (ncycle % ncycle_out == 0) {
+      current_cycle_t = GetCurrentTime();
       std::cout << "cycle=" << ncycle << std::scientific
                 << std::setprecision(dt_precision)
-                << " time=" << time << " dt=" << dt;
+                << " time=" << time << " dt=" << dt
+                << " wt=" << current_cycle_t - last_cycle_t;
+      last_cycle_t = current_cycle_t;
       if (dt_diagnostics != -1) {
         if (STS_ENABLED) {
           if (UserTimeStep_ == nullptr)
@@ -2367,4 +2370,11 @@ void Mesh::OutputCycleDiagnostics() {
     }
   }
   return;
+}
+
+double Mesh::GetCurrentTime() {
+    auto now = std::chrono::system_clock::now();
+    return static_cast<double>(
+        std::chrono::time_point_cast<std::chrono::microseconds>(
+            now).time_since_epoch().count())/1.0e6;
 }

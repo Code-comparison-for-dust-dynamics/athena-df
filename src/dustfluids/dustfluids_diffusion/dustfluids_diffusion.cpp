@@ -44,6 +44,11 @@ DustFluidsDiffusion::DustFluidsDiffusion(DustFluids *pdf, ParameterInput *pin) :
 
   // Turn on dust diffusion
   if (Diffusion_Flag) {
+    if (NGHOST < 2) {
+      std::stringstream msg;
+      msg << "The NGHOST must be larger than or equaled to 2!" << std::endl;
+      ATHENA_ERROR(msg);
+    }
     dustfluids_diffusion_defined = true;
     Momentum_Diffusion_Flag = pin->GetOrAddBoolean("dust", "Momentum_Diffusion_Flag", false);
   }
@@ -173,9 +178,10 @@ Real DustFluidsDiffusion::NewDiffusionDt() {
           len(i) = (f3) ? std::min(len(i), dx3(i)) : len(i);
         }
         if (dustfluids_diffusion_defined) {
-          for (int i=il; i<=iu; ++i)
+          for (int i=il; i<=iu; ++i) {
             dt_df_diff = std::min(dt_df_diff, static_cast<Real>(
                 SQR(len(i))*fac/(diff_t(i) + TINY_NUMBER)));
+          }
         }
       }
     }

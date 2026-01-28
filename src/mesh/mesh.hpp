@@ -106,7 +106,7 @@ class MeshBlock {
   int ncc1, ncc2, ncc3;
   int nfre_ang; //total number of frequency x total number of angles
   int is, ie, js, je, ks, ke;
-  int gid, lid;
+  int gid, lid; // global ID, level ID
   int cis, cie, cjs, cje, cks, cke, cnghost;
   int gflag;
 
@@ -266,6 +266,7 @@ class Mesh {
   const FluidFormulation fluid_setup;
   Real start_time, time, tlim, dt, dt_hyperbolic, dt_parabolic, dt_user, cfl_number;
   int nlim, ncycle, ncycle_out, dt_diagnostics;
+  Real last_cycle_t, current_cycle_t;
   std::string sts_integrator;
   Real sts_max_dt_ratio;
   TaskType sts_loc;
@@ -309,6 +310,7 @@ class Mesh {
   // defined in either the prob file or default_pgen.cpp in ../pgen/
   void UserWorkAfterLoop(ParameterInput *pin);   // called in main loop
   void UserWorkInLoop(); // called in main after each cycle
+  double GetCurrentTime(); // RL: added for convenience
 
  private:
   // data
