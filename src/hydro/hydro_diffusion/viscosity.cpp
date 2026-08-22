@@ -712,7 +712,7 @@ void ConstViscosity(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Rea
             const Real &gas_rho = prim(IDN, k, j, i);
             Real inv_Omega_K = inv_GMroot*std::pow(rad, 1.5);
             phdif->nu(HydroDiffusion::DiffProcess::alpha, k, j, i) =
-            phdif->alpha_vis*gas_pre/gas_rho*inv_Omega_K;
+            phdif->alpha_vis*gamma*gas_pre/gas_rho*inv_Omega_K;
           }
         }
       }

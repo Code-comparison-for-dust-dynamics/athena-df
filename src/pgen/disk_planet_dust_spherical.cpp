@@ -431,8 +431,8 @@ void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
 void MeshBlock::ProblemGenerator(ParameterInput *pin) {
 
   std::int64_t iseed = -1 - gid;
-  Real gamma_gas = peos->GetGamma();
-  Real igm1      = 1.0/(gamma_gas - 1.0);
+  Real gamma = peos->GetGamma();
+  Real igm1  = 1.0/(gamma - 1.0);
   OrbitalVelocityFunc &vK = porb->OrbitalVelocity;
 
   Real orb_defined;
@@ -452,7 +452,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
         Real cs_square   = PoverRho(rad, phi, z);
         Real omega_dyn   = std::sqrt(gm0/(rad*rad*rad));
         Real vel_K       = vK(porb, x1, x2, x3);
-        Real vis_vel_cyl = -1.5*(alpha_vis*cs_square/rad/omega_dyn);
+        Real vis_vel_cyl = -1.5*(alpha_vis*gamma*cs_square/rad/omega_dyn);
         Real vel_K_sph   = vel_K;
 
         Real den_gas        = DenProfileCyl_gas(rad, phi, z);
@@ -580,7 +580,7 @@ void MyDustDiffusivity(DustFluids *pdf, MeshBlock *pmb,
           const Real &gas_den = w(IDN, k, j, i);
 
           Real inv_Omega_K = std::pow(rad_arr(i), 1.5)*inv_sqrt_gm0;
-          Real nu_gas      = alpha_vis*inv_Omega_K*gas_pre/gas_den;
+          Real nu_gas      = alpha_vis*gamma*inv_Omega_K*gas_pre/gas_den;
 
           Real &diffusivity = nu_dust(dust_id, k, j, i);
           diffusivity       = nu_gas/(1.0 + SQR(Stokes_number[dust_id]));
@@ -973,6 +973,7 @@ void DiskInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Athe
                   int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
 
   OrbitalVelocityFunc &vK = pmb->porb->OrbitalVelocity;
+  Real gamma = pmb->peos->GetGamma();
 
   Real orb_defined;
   (pmb->porb->orbital_advection_defined) ? orb_defined = 1.0 : orb_defined = 0.0;
@@ -987,7 +988,7 @@ void DiskInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Athe
 
         Real cs_square   = PoverRho(rad_gh, phi_gh, z_gh);
         Real omega_dyn   = std::sqrt(gm0/(rad_gh*rad_gh*rad_gh));
-        Real vis_vel_cyl = -1.5*(alpha_vis*cs_square/rad_gh/omega_dyn);
+        Real vis_vel_cyl = -1.5*(alpha_vis*gamma*cs_square/rad_gh/omega_dyn);
         Real vel_K       = vK(pmb->porb, pco->x1v(il-i), pco->x2v(j), pco->x3v(k));
         Real eta_gas     = 0.5*(qvalue + pvalue)*cs_square/SQR(rad_gh*omega_dyn);
         //Real vel_K_sph   = std::sqrt(gm0/(pco->x1v(il-i)));
@@ -1053,6 +1054,7 @@ void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Athe
                   int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
 
   OrbitalVelocityFunc &vK = pmb->porb->OrbitalVelocity;
+  Real gamma = pmb->peos->GetGamma();
 
   Real orb_defined;
   (pmb->porb->orbital_advection_defined) ? orb_defined = 1.0 : orb_defined = 0.0;
@@ -1065,7 +1067,7 @@ void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Athe
 
         Real cs_square   = PoverRho(rad_gh, phi_gh, z_gh);
         Real omega_dyn   = std::sqrt(gm0/(rad_gh*rad_gh*rad_gh));
-        Real vis_vel_cyl = -1.5*(alpha_vis*cs_square/rad_gh/omega_dyn);
+        Real vis_vel_cyl = -1.5*(alpha_vis*gamma*cs_square/rad_gh/omega_dyn);
         Real vel_K       = vK(pmb->porb, pco->x1v(iu+i), pco->x2v(j), pco->x3v(k));
         Real eta_gas     = 0.5*(qvalue + pvalue)*cs_square/SQR(rad_gh*omega_dyn);
         //Real vel_K_sph   = std::sqrt(gm0/(pco->x1v(iu+i)));
@@ -1124,6 +1126,7 @@ void DiskInnerX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Athe
                   int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
 
   OrbitalVelocityFunc &vK = pmb->porb->OrbitalVelocity;
+  Real gamma = pmb->peos->GetGamma();
 
   Real orb_defined;
   (pmb->porb->orbital_advection_defined) ? orb_defined = 1.0 : orb_defined = 0.0;
@@ -1138,7 +1141,7 @@ void DiskInnerX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Athe
 
         Real cs_square   = PoverRho(rad_gh, phi_gh, z_gh);
         Real omega_dyn   = std::sqrt(gm0/(rad_gh*rad_gh*rad_gh));
-        Real vis_vel_cyl = -1.5*(alpha_vis*cs_square/rad_gh/omega_dyn);
+        Real vis_vel_cyl = -1.5*(alpha_vis*gamma*cs_square/rad_gh/omega_dyn);
         Real vel_K       = vK(pmb->porb, pco->x1v(i), pco->x2v(jl-j), pco->x3v(k));
         Real eta_gas     = 0.5*(qvalue + pvalue)*cs_square/SQR(rad_gh*omega_dyn);
         //Real vel_K_sph   = std::sqrt(gm0/(pco->x1v(i)));
@@ -1205,6 +1208,7 @@ void DiskOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Athe
                   int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
 
   OrbitalVelocityFunc &vK = pmb->porb->OrbitalVelocity;
+  Real gamma = pmb->peos->GetGamma();
 
   Real orb_defined;
   (pmb->porb->orbital_advection_defined) ? orb_defined = 1.0 : orb_defined = 0.0;
@@ -1219,7 +1223,7 @@ void DiskOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Athe
 
         Real cs_square   = PoverRho(rad_gh, phi_gh, z_gh);
         Real omega_dyn   = std::sqrt(gm0/(rad_gh*rad_gh*rad_gh));
-        Real vis_vel_cyl = -1.5*(alpha_vis*cs_square/rad_gh/omega_dyn);
+        Real vis_vel_cyl = -1.5*(alpha_vis*gamma*cs_square/rad_gh/omega_dyn);
         Real vel_K       = vK(pmb->porb, pco->x1v(i), pco->x2v(ju+j), pco->x3v(k));
         Real eta_gas     = 0.5*(qvalue + pvalue)*cs_square/SQR(rad_gh*omega_dyn);
         //Real vel_K_sph   = std::sqrt(gm0/(pco->x1v(i)));
@@ -1314,8 +1318,8 @@ void LocalIsothermalEOS(MeshBlock *pmb, int il, int iu, int jl,
 void InnerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
     int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons) {
 
-  Real mygam = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(mygam - 1.0);
+  Real gamma = pmb->peos->GetGamma();
+  Real igm1  = 1.0/(gamma - 1.0);
 
   Real inv_inner_damp = 1.0/inner_width_damping;
   Real inv_outer_damp = 1.0/outer_width_damping;
@@ -1355,7 +1359,7 @@ void InnerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
           Real gas_rho_0   = DenProfileCyl_gas(rad_arr(i), phi_arr(i), z_arr(i));
           Real cs_square_0 = PoverRho(rad_arr(i), phi_arr(i), z_arr(i));
 
-          Real vis_vel_cyl  = -1.5*(alpha_vis*cs_square_0/rad_arr(i)/omega_dyn(i));
+          Real vis_vel_cyl  = -1.5*(alpha_vis*gamma*cs_square_0/rad_arr(i)/omega_dyn(i));
           Real vel_gas_phi  = VelProfileCyl_gas(rad_arr(i), phi_arr(i), z_arr(i));
           vel_gas_phi      -= orb_defined*vK(pmb->porb, x1, x2, x3);
 
@@ -1406,8 +1410,8 @@ void InnerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
 void OuterWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
     int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons) {
 
-  Real mygam = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(mygam - 1.0);
+  Real gamma = pmb->peos->GetGamma();
+  Real igm1  = 1.0/(gamma - 1.0);
 
   Real inv_inner_damp = 1.0/inner_width_damping;
   Real inv_outer_damp = 1.0/outer_width_damping;
@@ -1447,7 +1451,7 @@ void OuterWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
           Real gas_rho_0   = DenProfileCyl_gas(rad_arr(i), phi_arr(i), z_arr(i));
           Real cs_square_0 = PoverRho(rad_arr(i), phi_arr(i), z_arr(i));
 
-          Real vis_vel_cyl  = -1.5*(alpha_vis*cs_square_0/rad_arr(i)/omega_dyn(i));
+          Real vis_vel_cyl  = -1.5*(alpha_vis*gamma*cs_square_0/rad_arr(i)/omega_dyn(i));
           Real vel_gas_phi  = VelProfileCyl_gas(rad_arr(i), phi_arr(i), z_arr(i));
           vel_gas_phi      -= orb_defined*vK(pmb->porb, x1, x2, x3);
 
@@ -1498,8 +1502,8 @@ void OuterWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
 void UpperWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
     int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons) {
 
-  Real mygam = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(mygam - 1.0);
+  Real gamma = pmb->peos->GetGamma();
+  Real igm1  = 1.0/(gamma - 1.0);
 
   Real inv_upper_damp = 1.0/upper_altitude_damping;
   Real inv_lower_damp = 1.0/lower_altitude_damping;
@@ -1539,7 +1543,7 @@ void UpperWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
           Real gas_rho_0   = DenProfileCyl_gas(rad_arr(i), phi_arr(i), z_arr(i));
           Real cs_square_0 = PoverRho(rad_arr(i), phi_arr(i), z_arr(i));
 
-          Real vis_vel_cyl  = -1.5*(alpha_vis*cs_square_0/rad_arr(i)/omega_dyn(i));
+          Real vis_vel_cyl  = -1.5*(alpha_vis*gamma*cs_square_0/rad_arr(i)/omega_dyn(i));
           Real vel_gas_phi  = VelProfileCyl_gas(rad_arr(i), phi_arr(i), z_arr(i));
           vel_gas_phi      -= orb_defined*vK(pmb->porb, x1, x2, x3);
 
@@ -1590,8 +1594,8 @@ void UpperWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
 void LowerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
     int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons) {
 
-  Real mygam = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(mygam - 1.0);
+  Real gamma = pmb->peos->GetGamma();
+  Real igm1  = 1.0/(gamma - 1.0);
 
   Real inv_upper_damp = 1.0/upper_altitude_damping;
   Real inv_lower_damp = 1.0/lower_altitude_damping;
@@ -1631,7 +1635,7 @@ void LowerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
           Real gas_rho_0   = DenProfileCyl_gas(rad_arr(i), phi_arr(i), z_arr(i));
           Real cs_square_0 = PoverRho(rad_arr(i), phi_arr(i), z_arr(i));
 
-          Real vis_vel_cyl  = -1.5*(alpha_vis*cs_square_0/rad_arr(i)/omega_dyn(i));
+          Real vis_vel_cyl  = -1.5*(alpha_vis*gamma*cs_square_0/rad_arr(i)/omega_dyn(i));
           Real vel_gas_phi  = VelProfileCyl_gas(rad_arr(i), phi_arr(i), z_arr(i));
           vel_gas_phi      -= orb_defined*vK(pmb->porb, x1, x2, x3);
 
