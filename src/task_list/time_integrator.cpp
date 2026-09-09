@@ -1001,12 +1001,12 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
     }
 
     if ((NDUSTFLUIDS > 0) && (NSCALARS > 0)) {
-      AddTask(SRCTERM_DFS,INT_DFS);
       AddTask(SRC_TERM,(INT_HYD|INT_SCLR|INT_CHM));
+      AddTask(SRCTERM_DFS,(SRC_TERM|INT_DFS));
       AddTask(DRAG_DFS,(SRC_TERM|SRCTERM_DFS));
     } else if (NDUSTFLUIDS > 0) {
-      AddTask(SRCTERM_DFS,INT_DFS);
       AddTask(SRC_TERM,INT_HYD);
+      AddTask(SRCTERM_DFS,(SRC_TERM|INT_DFS));
       AddTask(DRAG_DFS,(SRC_TERM|SRCTERM_DFS));
     } else if (NSCALARS > 0) {
       AddTask(SRC_TERM,(INT_HYD|INT_SCLR|INT_CHM));
