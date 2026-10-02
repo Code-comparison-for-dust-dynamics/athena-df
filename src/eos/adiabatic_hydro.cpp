@@ -45,6 +45,7 @@ void EquationOfState::ConservedToPrimitive(
     AthenaArray<Real> &prim, AthenaArray<Real> &bcc,
     Coordinates *pco, int il, int iu, int jl, int ju, int kl, int ku) {
   Real gm1 = GetGamma() - 1.0;
+  Real internal_energy_floor = pressure_floor_/gm1;
 
   for (int k=kl; k<=ku; ++k) {
     for (int j=jl; j<=ju; ++j) {
@@ -74,9 +75,13 @@ void EquationOfState::ConservedToPrimitive(
         Real e_k = 0.5*di*(SQR(u_m1) + SQR(u_m2) + SQR(u_m3));
         w_p = gm1*(u_e - e_k);
 
-        // apply pressure floor, correct total energy
-        u_e = (w_p > pressure_floor_) ?  u_e : ((pressure_floor_/gm1) + e_k);
-        w_p = (w_p > pressure_floor_) ?  w_p : pressure_floor_;
+        // Compare in total-energy space so rebuilding primitives from a restart is
+        // idempotent even when subtracting e_k would suffer cancellation.
+        Real e_floor = internal_energy_floor + e_k;
+        if (!(u_e > e_floor)) {
+          u_e = e_floor;
+          w_p = pressure_floor_;
+        }
       }
     }
   }
