@@ -175,6 +175,8 @@ class MeshBlock {
   // data
   Real new_block_dt_, new_block_dt_hyperbolic_, new_block_dt_parabolic_,
     new_block_dt_user_;
+  // dust constraints, applied in Mesh::NewTimeStep() only once dust is released
+  Real new_block_dt_dust_hyperbolic_, new_block_dt_dust_parabolic_;
   //! \todo(felker):
   //! * make global TaskList a member of MeshBlock, store TaskStates in list
   //!   shared by main integrator + FFT gravity task lists.
@@ -252,6 +254,7 @@ class Mesh {
 
   // accessors
   int GetNumMeshThreads() const {return num_mesh_threads_;}
+  PostUpdateFunc GetUserPostUpdateFunction() const {return UserPostUpdate_;}
   std::int64_t GetTotalCells() {return static_cast<std::int64_t> (nbtotal)*
   my_blocks(0)->block_size.nx1*my_blocks(0)->block_size.nx2*my_blocks(0)->block_size.nx3;}
 
@@ -361,6 +364,7 @@ class Mesh {
 
   AMRFlagFunc AMRFlag_;
   SrcTermFunc UserSourceTerm_;
+  PostUpdateFunc UserPostUpdate_;
   DustStoppingTimeFunc UserStoppingTime_;
   TimeStepFunc UserTimeStep_;
   HistoryOutputFunc *user_history_func_;
@@ -431,6 +435,7 @@ class Mesh {
   void EnrollUserRefinementCondition(AMRFlagFunc amrflag);
   void EnrollUserMeshGenerator(CoordinateDirection dir, MeshGenFunc my_mg);
   void EnrollUserExplicitSourceFunction(SrcTermFunc my_func);
+  void EnrollUserPostUpdateFunction(PostUpdateFunc my_func);
   void EnrollUserDustStoppingTime(DustStoppingTimeFunc my_func);
   void EnrollUserTimeStepFunction(TimeStepFunc my_func);
   void AllocateUserHistoryOutput(int n);

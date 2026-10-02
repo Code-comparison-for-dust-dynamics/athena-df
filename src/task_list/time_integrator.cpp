@@ -42,6 +42,27 @@
 #include "../scalars/scalars.hpp"
 #include "task_list.hpp"
 
+namespace {
+//! Dust is evolved only in cycles that start at or after dust/time_drag (always when
+//! time_drag = 0). Before that the problem generator sets dust from the gas after every
+//! update, so the dust evolution tasks are skipped and the gas does not depend on dust.
+inline bool DustReleased(const MeshBlock *pmb) {
+  return (NDUSTFLUIDS > 0) && (pmb->pdustfluids->dfdrag.time_drag == 0.0
+                               || pmb->pmy_mesh->time >= pmb->pdustfluids->dfdrag.time_drag);
+}
+
+//! Dust stopping times, diffusivities and sound speeds are inputs to the dust tasks, which are
+//! skipped before release, and to the dust timestep, which Mesh::NewTimeStep() applies from the
+//! first released cycle onwards. That dt is computed at the end of the previous cycle, so refresh
+//! the properties one cycle early as well; otherwise the first released cycle would use values
+//! left over from the last Mesh::Initialize() (startup, restart or regrid).
+inline bool DustPropertiesNeeded(const MeshBlock *pmb) {
+  if (NDUSTFLUIDS <= 0) return false;
+  if (DustReleased(pmb)) return true;
+  return pmb->pmy_mesh->time + pmb->pmy_mesh->dt >= pmb->pdustfluids->dfdrag.time_drag;
+}
+} // namespace
+
 //----------------------------------------------------------------------------------------
 //! TimeIntegratorTaskList constructor
 
@@ -920,7 +941,7 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
       } else { // Hydro
         AddTask(CALC_HYDFLX,DIFFUSE_HYD);
       }
-      if (Globals::local_ndustfluids_inte > 0) {
+      if (NDUSTFLUIDS > 0) {
         AddTask(PROPERTIES_DFS,NONE);
         AddTask(DIFFUSE_DFS,(PROPERTIES_DFS|DIFFUSE_HYD));
         AddTask(CALC_DFSFLX,DIFFUSE_DFS);
@@ -931,7 +952,7 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
       }
     } else { // STS enabled:
       AddTask(CALC_HYDFLX,NONE);
-      if (Globals::local_ndustfluids_inte > 0)
+      if (NDUSTFLUIDS > 0)
         AddTask(CALC_DFSFLX,NONE);
       if (NSCALARS > 0)
         AddTask(CALC_SCLRFLX,CALC_HYDFLX);
@@ -939,7 +960,7 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
     if (pm->multilevel || SHEAR_PERIODIC) { // SMR or AMR or shear periodic
       AddTask(SEND_HYDFLX,CALC_HYDFLX);
       AddTask(RECV_HYDFLX,CALC_HYDFLX);
-      if (Globals::local_ndustfluids_inte > 0) {
+      if (NDUSTFLUIDS > 0) {
         AddTask(SEND_DFSFLX,CALC_DFSFLX);
         AddTask(RECV_DFSFLX,CALC_DFSFLX);
       }
@@ -947,19 +968,19 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
         AddTask(SEND_HYDFLXSH,RECV_HYDFLX);
         AddTask(RECV_HYDFLXSH,(SEND_HYDFLX|RECV_HYDFLX));
         AddTask(INT_HYD,RECV_HYDFLXSH);
-        if (Globals::local_ndustfluids_inte > 0) {
+        if (NDUSTFLUIDS > 0) {
           AddTask(SEND_DFSFLXSH,RECV_DFSFLX);
           AddTask(RECV_DFSFLXSH,(SEND_DFSFLX|RECV_DFSFLX));
           AddTask(INT_DFS,RECV_DFSFLXSH);
         }
       } else {
         AddTask(INT_HYD,RECV_HYDFLX);
-        if (Globals::local_ndustfluids_inte > 0)
+        if (NDUSTFLUIDS > 0)
           AddTask(INT_DFS,RECV_DFSFLX);
       }
     } else {
       AddTask(INT_HYD, CALC_HYDFLX);
-      if (Globals::local_ndustfluids_inte > 0)
+      if (NDUSTFLUIDS > 0)
         AddTask(INT_DFS,CALC_DFSFLX);
     }
 
@@ -999,14 +1020,14 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
       AddTask(SETB_CRTC,(RECV_CRTC|SRCTERM_CRTC));
     }
 
-    if ((Globals::local_ndustfluids_inte > 0) && (NSCALARS > 0)) {
+    if ((NDUSTFLUIDS > 0) && (NSCALARS > 0)) {
       AddTask(SRCTERM_DFS,INT_DFS);
       // A user hydro source may also update dust conserved variables.  Run it only
       // after the dust update/source task so df_u and its pre-drag backup have a
       // deterministic ordering independent of boundary-message arrival timing.
       AddTask(SRC_TERM,(INT_HYD|INT_SCLR|INT_CHM|SRCTERM_DFS));
       AddTask(DRAG_DFS,(SRC_TERM|SRCTERM_DFS));
-    } else if (Globals::local_ndustfluids_inte > 0) {
+    } else if (NDUSTFLUIDS > 0) {
       AddTask(SRCTERM_DFS,INT_DFS);
       AddTask(SRC_TERM,(INT_HYD|SRCTERM_DFS));
       AddTask(DRAG_DFS,(SRC_TERM|SRCTERM_DFS));
@@ -1018,7 +1039,7 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
 
     // Hydro will also be updated with radiation source term, dust source term and drag
     TaskID src_aterm = SRC_TERM;
-    if (Globals::local_ndustfluids_inte > 0) {
+    if (NDUSTFLUIDS > 0) {
       src_aterm = (src_aterm | SRCTERM_DFS | DRAG_DFS);
     }
 
@@ -1028,34 +1049,33 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
     if (CR_ENABLED)
       src_aterm = (src_aterm | SRCTERM_CRTC);
 
+    TaskID state_ready = src_aterm;
     if (ORBITAL_ADVECTION) {
       AddTask(SEND_HYDORB,src_aterm);
       AddTask(RECV_HYDORB,NONE);
       AddTask(CALC_HYDORB,(SEND_HYDORB|RECV_HYDORB));
-      AddTask(SEND_HYD,CALC_HYDORB);
-      AddTask(RECV_HYD,NONE);
-      AddTask(SETB_HYD,(RECV_HYD|CALC_HYDORB));
-      if (Globals::local_ndustfluids_inte > 0) {
-        AddTask(SEND_DFS,CALC_HYDORB);
-        AddTask(RECV_DFS,NONE);
-        AddTask(SETB_DFS,(RECV_DFS|CALC_HYDORB));
-      }
-    } else {
-      AddTask(SEND_HYD,src_aterm);
-      AddTask(RECV_HYD,NONE);
-      AddTask(SETB_HYD,(RECV_HYD|SRC_TERM));
-      if (Globals::local_ndustfluids_inte > 0) {
-        AddTask(SEND_DFS,src_aterm);
-        AddTask(RECV_DFS,NONE);
-        AddTask(SETB_DFS,(RECV_DFS | src_aterm));
-      }
+      state_ready = CALC_HYDORB;
+    }
+
+    if (pm->GetUserPostUpdateFunction() != nullptr) {
+      AddTask(USER_POST_UPDATE,state_ready);
+      state_ready = USER_POST_UPDATE;
+    }
+
+    AddTask(SEND_HYD,state_ready);
+    AddTask(RECV_HYD,NONE);
+    AddTask(SETB_HYD,(RECV_HYD|state_ready));
+    if (NDUSTFLUIDS > 0) {
+      AddTask(SEND_DFS,state_ready);
+      AddTask(RECV_DFS,NONE);
+      AddTask(SETB_DFS,(RECV_DFS|state_ready));
     }
 
     if (SHEAR_PERIODIC) {
       AddTask(SEND_HYDSH,SETB_HYD);
       AddTask(RECV_HYDSH,SEND_HYDSH);
 
-      if (Globals::local_ndustfluids_inte > 0) {
+      if (NDUSTFLUIDS > 0) {
         AddTask(SEND_DFSSH,SETB_DFS);
         AddTask(RECV_DFSSH,SEND_DFSSH);
       }
@@ -1135,9 +1155,9 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
       if (pm->multilevel) { // SMR or AMR
        TaskID setb=(SEND_HYD|SEND_FLD);
         if (SHEAR_PERIODIC) {
-          if ((Globals::local_ndustfluids_inte > 0) && (NSCALARS > 0)) {
+          if ((NDUSTFLUIDS > 0) && (NSCALARS > 0)) {
             setb=(setb|RECV_HYDSH|SEND_DFS|SEND_SCLR|RECV_DFSSH|RECV_SCLRSH|RECV_FLDSH);
-          } else if (Globals::local_ndustfluids_inte > 0) {
+          } else if (NDUSTFLUIDS > 0) {
             setb=(setb|RECV_HYDSH|SEND_DFS|RECV_DFSSH|RECV_FLDSH);
           } else if (NSCALARS > 0) {
             setb=(setb|RECV_HYDSH|SEND_SCLR|RECV_SCLRSH|RECV_FLDSH);
@@ -1145,9 +1165,9 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
             setb=(setb|RECV_HYDSH|RECV_FLDSH);
           }
         } else {
-          if ((Globals::local_ndustfluids_inte > 0) && (NSCALARS > 0)) {
+          if ((NDUSTFLUIDS > 0) && (NSCALARS > 0)) {
             setb=(setb|SETB_HYD|SETB_FLD|SEND_DFS|SETB_DFS|SEND_SCLR|SETB_SCLR);
-          } else if (Globals::local_ndustfluids_inte > 0) {
+          } else if (NDUSTFLUIDS > 0) {
             setb=(setb|SETB_HYD|SETB_FLD|SEND_DFS|SETB_DFS);
           } else if (NSCALARS > 0) {
             setb=(setb|SETB_HYD|SETB_FLD|SEND_SCLR|SETB_SCLR);
@@ -1170,9 +1190,9 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
         AddTask(CONS2PRIM,PROLONG);
       } else {
         if (SHEAR_PERIODIC) {
-          if ((Globals::local_ndustfluids_inte > 0) && (NSCALARS > 0)) {
+          if ((NDUSTFLUIDS > 0) && (NSCALARS > 0)) {
             AddTask(CONS2PRIM,(RECV_HYDSH|RECV_FLDSH|RECV_DFSSH|RECV_SCLRSH));
-          } else if (Globals::local_ndustfluids_inte > 0) {
+          } else if (NDUSTFLUIDS > 0) {
             AddTask(CONS2PRIM,(RECV_HYDSH|RECV_FLDSH|RECV_DFSSH));
           } else if (NSCALARS > 0) {
             AddTask(CONS2PRIM,(RECV_HYDSH|RECV_FLDSH|RECV_SCLRSH));
@@ -1180,9 +1200,9 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
             AddTask(CONS2PRIM,(RECV_HYDSH|RECV_FLDSH));
           }
         } else {
-          if ((Globals::local_ndustfluids_inte > 0) && (NSCALARS > 0)) {
+          if ((NDUSTFLUIDS > 0) && (NSCALARS > 0)) {
             AddTask(CONS2PRIM,(SETB_HYD|SETB_FLD|SETB_DFS|SETB_SCLR));
-          } else if (Globals::local_ndustfluids_inte > 0) {
+          } else if (NDUSTFLUIDS > 0) {
             AddTask(CONS2PRIM,(SETB_HYD|SETB_FLD|SETB_DFS));
           } else if (NSCALARS > 0) {
             AddTask(CONS2PRIM,(SETB_HYD|SETB_FLD|SETB_SCLR));
@@ -1196,9 +1216,9 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
       if (pm->multilevel) { // SMR or AMR
         TaskID setb=(SEND_HYD);
         if (SHEAR_PERIODIC) {
-          if ((Globals::local_ndustfluids_inte > 0) && (NSCALARS > 0)) {
+          if ((NDUSTFLUIDS > 0) && (NSCALARS > 0)) {
             setb=(setb|RECV_HYDSH|SEND_DFS|RECV_DFSSH|SEND_SCLR|RECV_SCLRSH);
-          } else if (Globals::local_ndustfluids_inte > 0) {
+          } else if (NDUSTFLUIDS > 0) {
             setb=(setb|RECV_HYDSH|SEND_DFS|RECV_DFSSH);
           } else if (NSCALARS > 0) {
             setb=(setb|RECV_HYDSH|SEND_SCLR|RECV_SCLRSH);
@@ -1206,9 +1226,9 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
             setb=(setb|RECV_HYDSH);
           }
         } else {
-          if ((Globals::local_ndustfluids_inte > 0) && (NSCALARS > 0)) {
+          if ((NDUSTFLUIDS > 0) && (NSCALARS > 0)) {
             setb=(setb|SETB_HYD|SEND_DFS|SETB_DFS|SEND_SCLR|SETB_SCLR);
-          } else if (Globals::local_ndustfluids_inte > 0) {
+          } else if (NDUSTFLUIDS > 0) {
             setb=(setb|SETB_HYD|SEND_DFS|SETB_DFS);
           } else if (NSCALARS > 0) {
             setb=(setb|SETB_HYD|SEND_SCLR|SETB_SCLR);
@@ -1232,7 +1252,7 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
         if (SHEAR_PERIODIC) {
           if ((NSCALARS > 0) && (NSCALARS > 0)) {
             AddTask(CONS2PRIM,(RECV_HYDSH|RECV_SCLRSH|RECV_DFSSH));
-          } else if (Globals::local_ndustfluids_inte > 0) {
+          } else if (NDUSTFLUIDS > 0) {
             AddTask(CONS2PRIM,(RECV_HYDSH|RECV_DFSSH));
           } else if (NSCALARS > 0) {
             AddTask(CONS2PRIM,(RECV_HYDSH|RECV_SCLRSH));
@@ -1240,9 +1260,9 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
             AddTask(CONS2PRIM,RECV_HYDSH);
           }
         } else {
-          if ((Globals::local_ndustfluids_inte > 0) && (NSCALARS > 0)) {
+          if ((NDUSTFLUIDS > 0) && (NSCALARS > 0)) {
             AddTask(CONS2PRIM,(SETB_HYD|SETB_DFS|SETB_SCLR));
-          } else if (Globals::local_ndustfluids_inte > 0) {
+          } else if (NDUSTFLUIDS > 0) {
             AddTask(CONS2PRIM,(SETB_HYD|SETB_DFS));
           } else if (NSCALARS > 0) {
             AddTask(CONS2PRIM,(SETB_HYD|SETB_SCLR));
@@ -1362,6 +1382,11 @@ void TimeIntegratorTaskList::AddTask(const TaskID& id, const TaskID& dep) {
     task_list_[ntasks].TaskFunc=
         static_cast<TaskStatus (TaskList::*)(MeshBlock*,int)>
         (&TimeIntegratorTaskList::AddSourceTerms);
+    task_list_[ntasks].lb_time = true;
+  } else if (id == USER_POST_UPDATE) {
+    task_list_[ntasks].TaskFunc=
+        static_cast<TaskStatus (TaskList::*)(MeshBlock*,int)>
+        (&TimeIntegratorTaskList::UserPostUpdate);
     task_list_[ntasks].lb_time = true;
   } else if (id == SEND_HYD) {
     task_list_[ntasks].TaskFunc=
@@ -1788,7 +1813,7 @@ void TimeIntegratorTaskList::StartupTaskList(MeshBlock *pmb, int stage) {
         ATHENA_ERROR(msg);
       }
     }
-    if (Globals::local_ndustfluids_inte > 0) {
+    if (NDUSTFLUIDS > 0) {
       DustFluids *pdf = pmb->pdustfluids;
       pdf->df_u1.ZeroClear();
       if (integrator == "ssprk5_4")
@@ -1867,7 +1892,7 @@ TaskStatus TimeIntegratorTaskList::CalculateHydroFlux(MeshBlock *pmb, int stage)
 
   if (stage <= nstages) {
     if (stage_wghts[stage-1].main_stage) {
-      if (Globals::local_ndustfluids_inte > 0) {
+      if (DustReleased(pmb)) {
         if ((integrator == "vl2") && (stage-stage_wghts[0].orbital_stage == 1) &&
               (pdf->dfdrag.drag_method == "explicit")) {
           phydro->CalculateFluxes(phydro->w, pfield->b, pfield->bcc, 1);
@@ -2094,11 +2119,36 @@ TaskStatus TimeIntegratorTaskList::AddSourceTerms(MeshBlock *pmb, int stage) {
       ph->hsrc.AddSourceTerms(t_start_stage, dt, ph->flux, ph->w, pdf->df_w, ps->r,
                                   pf->bcc, ph->u, pdf->df_u, ps->s);
       pmb->DeepCopy(ph->u_af_src, ph->u);
-      if (Globals::local_ndustfluids_inte > 0) {
+      if (DustReleased(pmb)) {
         // User source functions are allowed to modify df_u through the hydro-source
         // callback, so this is the complete dust state that the drag solver must use.
         pmb->DeepCopy(pdf->df_u_af_src, pdf->df_u);
       }
+    }
+    return TaskStatus::next;
+  }
+  return TaskStatus::fail;
+}
+
+//----------------------------------------------------------------------------------------
+//! Apply user corrections to conservative states before boundary exchange.
+
+TaskStatus TimeIntegratorTaskList::UserPostUpdate(MeshBlock *pmb, int stage) {
+  if (stage <= nstages) {
+    PostUpdateFunc post_update = pmb->pmy_mesh->GetUserPostUpdateFunction();
+    bool final_stage = (stage == nstages);
+    if ((stage_wghts[stage-1].main_stage || final_stage) && post_update != nullptr) {
+      // Orbital-advection-only stages can follow the last hydro main stage.
+      bool final_main_stage = stage_wghts[stage-1].main_stage;
+      for (int next=stage; next<nstages && final_main_stage; ++next) {
+        final_main_stage = !stage_wghts[next].main_stage;
+      }
+      Real t_start = pmb->pmy_mesh->time
+                     + stage_wghts[stage-1].sbeta*pmb->pmy_mesh->dt;
+      Real t_end = pmb->pmy_mesh->time
+                   + stage_wghts[stage-1].ebeta*pmb->pmy_mesh->dt;
+      Real dt = stage_wghts[stage-1].beta*pmb->pmy_mesh->dt;
+      post_update(pmb, t_start, t_end, dt, stage, final_stage, final_main_stage);
     }
     return TaskStatus::next;
   }
@@ -2415,7 +2465,7 @@ TaskStatus TimeIntegratorTaskList::Primitives(MeshBlock *pmb, int stage) {
     pmb->peos->ConservedToPrimitive(ph->u, ph->w, pf->b,
                                     ph->w1, pf->bcc, pmb->pcoord,
                                     il, iu, jl, ju, kl, ku);
-    if (Globals::local_ndustfluids_inte > 0) {
+    if (NDUSTFLUIDS > 0) {
       pmb->peos->DustFluidsConservedToPrimitive(pdf->df_u, pdf->dfccdif.diff_mom_cc,
                                   pdf->df_w, pdf->df_w1, pmb->pcoord, il, iu, jl, ju, kl, ku);
     }
@@ -2447,7 +2497,7 @@ TaskStatus TimeIntegratorTaskList::Primitives(MeshBlock *pmb, int stage) {
       // Swap Hydro and (possibly) passive scalar quantities in BoundaryVariable interface
       // from conserved to primitive formulations:
       ph->hbvar.SwapHydroQuantity(ph->w1, HydroBoundaryQuantity::prim);
-      if (Globals::local_ndustfluids_inte > 0) {
+      if (NDUSTFLUIDS > 0) {
         if (pdf->dust_xorder == 4)
         pdf->dfbvar.SwapDustFluidsQuantity(pdf->df_w1, DustFluidsBoundaryQuantity::prim_df);
       }
@@ -2462,7 +2512,7 @@ TaskStatus TimeIntegratorTaskList::Primitives(MeshBlock *pmb, int stage) {
       pmb->peos->ConservedToPrimitiveCellAverage(ph->u, ph->w, pf->b,
                                                  ph->w1, pf->bcc, pmb->pcoord,
                                                  il, iu, jl, ju, kl, ku);
-      if (Globals::local_ndustfluids_inte > 0) {
+      if (NDUSTFLUIDS > 0) {
         pmb->peos->DustFluidsConservedToPrimitiveCellAverage(
             pdf->df_u, pdf->df_w, pdf->df_w1, pmb->pcoord, il, iu, jl, ju, kl, ku);
       }
@@ -2473,7 +2523,7 @@ TaskStatus TimeIntegratorTaskList::Primitives(MeshBlock *pmb, int stage) {
     }
     // swap AthenaArray data pointers so that w now contains the updated w_out
     ph->w.SwapAthenaArray(ph->w1);
-    if (Globals::local_ndustfluids_inte > 0)
+    if (NDUSTFLUIDS > 0)
       pdf->df_w.SwapAthenaArray(pdf->df_w1);
     // r1/r_old for GR is currently unused:
     // ps->r.SwapAthenaArray(ps->r1);
@@ -2498,7 +2548,7 @@ TaskStatus TimeIntegratorTaskList::PhysicalBoundary(MeshBlock *pmb, int stage) {
     // Swap Hydro and (possibly) dust fluids, passive scalar quantities in BoundaryVariable interface
     // from conserved to primitive formulations:
     ph->hbvar.SwapHydroQuantity(ph->w, HydroBoundaryQuantity::prim);
-    if (Globals::local_ndustfluids_inte > 0)
+    if (NDUSTFLUIDS > 0)
       pdf->dfbvar.SwapDustFluidsQuantity(pdf->df_w, DustFluidsBoundaryQuantity::prim_df);
     if (NSCALARS > 0) {
       ps->sbvar.var_cc = &(ps->r);
@@ -3295,7 +3345,7 @@ TaskStatus TimeIntegratorTaskList::AddSourceTermsCRTC(MeshBlock *pmb, int stage)
 TaskStatus TimeIntegratorTaskList::CalculateDustFluidsFlux(MeshBlock *pmb, int stage) {
   DustFluids *pdf = pmb->pdustfluids;
   if (stage <= nstages) {
-    if (stage_wghts[stage-1].main_stage) {
+    if (stage_wghts[stage-1].main_stage && DustReleased(pmb)) {
       if ((integrator == "vl2") && (stage-stage_wghts[0].orbital_stage == 1) &&
           (pdf->dfdrag.drag_method == "explicit")) {
         pdf->CalculateDustFluidsFluxes(pdf->df_w, 1);
@@ -3357,7 +3407,7 @@ TaskStatus TimeIntegratorTaskList::IntegrateDustFluids(MeshBlock *pmb, int stage
   DustFluids *pdf = pmb->pdustfluids;
 
   if (stage <= nstages) {
-    if (stage_wghts[stage-1].main_stage) {
+    if (stage_wghts[stage-1].main_stage && DustReleased(pmb)) {
       // This time-integrator-specific averaging operation logic is identical to FieldInt
       Real ave_wghts[5];
       ave_wghts[0] = 1.0;
@@ -3407,6 +3457,9 @@ TaskStatus TimeIntegratorTaskList::IntegrateDustFluids(MeshBlock *pmb, int stage
 TaskStatus TimeIntegratorTaskList::AddSourceTermsDustFluids(MeshBlock *pmb, int stage) {
   DustFluids *pdf = pmb->pdustfluids;
 
+  // dust is not evolved before release (the problem generator sets it from the gas)
+  if (!DustReleased(pmb)) return (stage <= nstages) ? TaskStatus::next : TaskStatus::fail;
+
   // return if there are no source terms to be added
   if (!(pdf->dfsrc.dustfluids_sourceterms_defined)
       || pmb->pmy_mesh->fluid_setup != FluidFormulation::evolve) {
@@ -3441,7 +3494,7 @@ TaskStatus TimeIntegratorTaskList::SetPropertiesDustFluids(MeshBlock *pmb, int s
   DustFluids *pdf = pmb->pdustfluids;
 
   if (stage <= nstages) {
-    if (stage_wghts[stage-1].main_stage) {
+    if (stage_wghts[stage-1].main_stage && DustPropertiesNeeded(pmb)) {
       Real t_start_stage = pmb->pmy_mesh->time + stage_wghts[(stage-1)].sbeta*pmb->pmy_mesh->dt;
       pdf->SetDustFluidsProperties(t_start_stage, ph->w, pdf->df_w, pdf->stopping_time_array,
           pdf->nu_dustfluids_array, pdf->cs_dustfluids_array);
@@ -3477,6 +3530,8 @@ TaskStatus TimeIntegratorTaskList::DiffuseDustFluids(MeshBlock *pmb, int stage) 
   // return if there are no diffusion to be added
   if (!(pdf->dfdif.dustfluids_diffusion_defined)
       || pmb->pmy_mesh->fluid_setup != FluidFormulation::evolve) return TaskStatus::next;
+  // dust is not evolved before release (the problem generator sets it from the gas)
+  if (!DustReleased(pmb)) return TaskStatus::next;
 
   if (stage <= nstages) {
     if (stage_wghts[stage-1].main_stage ||
@@ -3484,7 +3539,7 @@ TaskStatus TimeIntegratorTaskList::DiffuseDustFluids(MeshBlock *pmb, int stage) 
         pmb->pmy_mesh->sts_loc == TaskType::op_split_after) {
       // if using orbital advection, put modified conservative into the function
       if (pmb->porb->orbital_advection_defined) {
-        for (int dust_id=0; dust_id<Globals::local_ndustfluids_inte; ++dust_id) {
+        for (int dust_id=0; dust_id<NDUSTFLUIDS; ++dust_id) {
           pmb->porb->ResetOrbitalSystemConversionFlag();
           pmb->porb->ConvertOrbitalSystemDustFluids(dust_id, pdf->df_w, pdf->df_u, OrbitalTransform::prim);
         }
@@ -3679,8 +3734,9 @@ TaskStatus TimeIntegratorTaskList::DustGasDrag(MeshBlock *pmb, int stage) {
         // Evaluate the aerodynamic drags at the beginning
         pdf->dfdrag.DragIntegrate(stage, dt, pdf->stopping_time_array,
                                   ph->w, pdf->df_w, ph->u, pdf->df_u);
-      } else if (t_start_stage >= (pdf->dfdrag.time_drag)) {
-        // Evaluate the time-dependent drags after dfdrag.time_drag
+      } else if (t_start_stage >= (pdf->dfdrag.time_drag) && DustReleased(pmb)) {
+        // Evaluate the time-dependent drags only in cycles that start at or after
+        // dfdrag.time_drag, i.e. only while dust is evolved (both stages of such cycles)
         pdf->dfdrag.DragIntegrate(stage, dt, pdf->stopping_time_array,
                                   ph->w, pdf->df_w, ph->u, pdf->df_u);
       }

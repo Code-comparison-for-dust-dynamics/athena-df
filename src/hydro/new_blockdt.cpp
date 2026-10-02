@@ -187,17 +187,17 @@ void Hydro::NewBlockTimeStep() {
     min_dt_hyperbolic = std::min(min_dt_hyperbolic, min_dt_hall);
   } // field diffusion
 
-  //if (NDUSTFLUIDS > 0) {
-  if (Globals::local_ndustfluids_inte > 0) { // RL: ignore dt due to dust before time_drag 
+  // Dust constraints are kept separately: Mesh::NewTimeStep() applies them only to cycles
+  // that start at or after time_drag, since dust is not evolved before release.
+  Real min_dt_hyperbolic_df = real_max, min_dt_parabolic_df = real_max;
+  if (NDUSTFLUIDS > 0) {
     // dust fluids advection
     DustFluids *pdf           = pmb->pdustfluids;
-    Real min_dt_hyperbolic_df = pdf->NewAdvectionDt();
-    min_dt_hyperbolic         = std::min(min_dt_hyperbolic, min_dt_hyperbolic_df);
+    min_dt_hyperbolic_df      = pdf->NewAdvectionDt();
     
     // dust fluids diffusion
     if (pdf->dfdif.dustfluids_diffusion_defined) {
-      Real min_dt_parabolic_df = pdf->dfdif.NewDiffusionDt();
-      min_dt_parabolic         = std::min(min_dt_parabolic, min_dt_parabolic_df);
+      min_dt_parabolic_df      = pdf->dfdif.NewDiffusionDt();
     }
   }
 
@@ -211,10 +211,14 @@ void Hydro::NewBlockTimeStep() {
   // (user-selected or automaticlaly enforced). May add independent parameter "cfl_diff"
   // in the future (with default = cfl_number).
   min_dt_parabolic *= pmb->pmy_mesh->cfl_number;
+  min_dt_hyperbolic_df *= pmb->pmy_mesh->cfl_number;
+  min_dt_parabolic_df  *= pmb->pmy_mesh->cfl_number;
 
   if (IM_RADIATION_ENABLED) {
     min_dt_hyperbolic *= pmb->pmy_mesh->pimrad->cfl_rad;
     min_dt_parabolic  *= pmb->pmy_mesh->pimrad->cfl_rad;
+    min_dt_hyperbolic_df *= pmb->pmy_mesh->pimrad->cfl_rad;
+    min_dt_parabolic_df  *= pmb->pmy_mesh->pimrad->cfl_rad;
   }
 
   // For orbital advection, give a restriction on dt_hyperbolic.
@@ -241,6 +245,8 @@ void Hydro::NewBlockTimeStep() {
   pmb->new_block_dt_hyperbolic_ = min_dt_hyperbolic;
   pmb->new_block_dt_parabolic_ = min_dt_parabolic;
   pmb->new_block_dt_user_ = min_dt_user;
+  pmb->new_block_dt_dust_hyperbolic_ = min_dt_hyperbolic_df;
+  pmb->new_block_dt_dust_parabolic_ = min_dt_parabolic_df;
 
   return;
 }

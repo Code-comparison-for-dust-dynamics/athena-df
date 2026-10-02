@@ -78,7 +78,6 @@ MassTransfer_Flag, TransferFeedback_Flag;
 
 int PlanetaryGravityOrder;
 std::string basename;
-int duty_cycle_b4time_drag;
 
 // User Sources
 void MySource(MeshBlock *pmb, const Real time, const Real dt, const AthenaArray<Real> &prim,
@@ -150,9 +149,9 @@ void InnerWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il
     int jl, int ju, int kl, int ku, AthenaArray<Real> &prim_df, AthenaArray<Real> &cons_df);
 void OuterWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
     int jl, int ju, int kl, int ku, AthenaArray<Real> &prim_df, AthenaArray<Real> &cons_df);
-void FixedDust(MeshBlock *pmb, int il, int iu, int jl, int ju, int kl, int ku,
-      const AthenaArray<Real> &w, AthenaArray<Real> &prim_df,
-      const AthenaArray<Real> &u, AthenaArray<Real> &cons_df);
+void PinDustBeforeRelease(MeshBlock *pmb);
+void PostUpdate(MeshBlock *pmb, const Real t_start, const Real t_end,
+    const Real dt, const int stage, const bool final_stage, const bool final_main_stage);
 void DustDensityPercentFloor(MeshBlock *pmb, int il, int iu, int jl, int ju, int kl, int ku,
       AthenaArray<Real> &prim_df, AthenaArray<Real> &cons_df);
 
@@ -224,7 +223,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   time_drag   = pin->GetOrAddReal("dust",    "time_drag",   0.0);
   time_refine = pin->GetOrAddReal("problem", "time_refine", time_drag);       // not used here
   Globals::local_ndustfluids_inte = NDUSTFLUIDS;
-  duty_cycle_b4time_drag = pin->GetOrAddInteger("dust", "duty_cycle_b4time_drag", 32);
+  // Legacy dust/duty_cycle_b4time_drag inputs are accepted but no longer used.
 
   // The parameters of one planet
   rad_planet   = pin->GetOrAddReal("problem",  "rad_planet", 1.0);            // radial position of the planet
@@ -340,6 +339,8 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
 
   // Enroll Thermal Relaxation
   EnrollUserExplicitSourceFunction(MySource);
+  // Pin dust to the gas before release, after every update and before boundary exchange.
+  EnrollUserPostUpdateFunction(PostUpdate);
 
   // Enroll user-defined thermal conduction
   if ((!Isothermal_Flag) && (beta > 0.0) && (RadiativeConduction_Flag))
@@ -1877,92 +1878,38 @@ void OuterWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il
 }
 
 
-void FixedDust(MeshBlock *pmb, int il, int iu, int jl, int ju, int kl, int ku,
-              const AthenaArray<Real> &w, AthenaArray<Real> &prim_df,
-              const AthenaArray<Real> &u, AthenaArray<Real> &cons_df) {
-  
-  int nc1 = pmb->ncells1;
-  OrbitalVelocityFunc &vK = pmb->porb->OrbitalVelocity;
-
-  Real orb_defined;
-  (pmb->porb->orbital_advection_defined) ? orb_defined = 1.0 : orb_defined = 0.0;
-
-  AthenaArray<Real> rad_arr, phi_arr, z_arr, cs_square, vel_K, eta_gas, vel_K_sph, omega_dyn;
-  //den_dust, vel_dust_cyl, vel_dust_phi,vel_dust_r, vel_dust_theta;
-
-  rad_arr.NewAthenaArray(nc1);
-  phi_arr.NewAthenaArray(nc1);
-  z_arr.NewAthenaArray(nc1);
-  cs_square.NewAthenaArray(nc1);
-  vel_K.NewAthenaArray(nc1);
-  vel_K_sph.NewAthenaArray(nc1);
-  omega_dyn.NewAthenaArray(nc1);
-  eta_gas.NewAthenaArray(nc1);
-
-  for (int k=kl; k<=ku; ++k) {
-    Real x3 = pmb->pcoord->x3v(k);
-    for (int j=jl; j<=ju; ++j) {
-      Real x2 = pmb->pcoord->x2v(j);
+// Pin only conserved active cells; normal stage communication and cons-to-prim
+// fill ghosts/primitives exactly as restart initialization does. No diffusive
+// momentum is retained while dust follows the gas before release.
+void PinDustBeforeRelease(MeshBlock *pmb) {
+  if ((NDUSTFLUIDS <= 0) || (time_drag <= 0.0) || (pmb->pmy_mesh->time >= time_drag))
+    return;
+  const AthenaArray<Real> &u = pmb->phydro->u;
+  AthenaArray<Real> &cons_df = pmb->pdustfluids->df_u;
+  for (int n=0; n<NDUSTFLUIDS; ++n) {
+    const int rho_id = 4*n;
+    const Real d2g = initial_D2G[n];
+    for (int k=pmb->ks; k<=pmb->ke; ++k) {
+      for (int j=pmb->js; j<=pmb->je; ++j) {
 #pragma omp simd
-      for (int i=il; i<=iu; ++i) {
-        Real x1 = pmb->pcoord->x1v(i);
-        GetCylCoordInSpherical(pmb->pcoord, rad_arr(i), phi_arr(i), z_arr(i), i, j, k);
-
-        cs_square(i) = PoverRho(rad_arr(i), phi_arr(i), z_arr(i));
-        vel_K(i)     = vK(pmb->porb, x1, x2, x3);
-        omega_dyn(i) = std::sqrt(gm0/(rad_arr(i)*rad_arr(i)*rad_arr(i)));
-        eta_gas(i)   = 0.5*(qvalue + pvalue)*cs_square(i)/SQR(rad_arr(i)*omega_dyn(i));
-        vel_K_sph(i) = vel_K(i);
-      }
-
-      for (int n=0; n<NDUSTFLUIDS; ++n) {
-        int dust_id = n;
-        int rho_id  = 4*dust_id;
-        int v1_id   = rho_id + 1;
-        int v2_id   = rho_id + 2;
-        int v3_id   = rho_id + 3;
-#pragma omp simd
-        for (int i=il; i<=iu; ++i) {
-          const Real &gas_rho = w(IDN, k, j, i);
-          Real den_dust       = initial_D2G[dust_id]*gas_rho;
-          //Real den_dust       = 1e-6*gas_rho;
-
-          /* RL: make more sense to follow gas motions          
-          Real vel_dust_cyl    = VelProfileCyl_NSH_rad_dust(rad_arr(i), phi_arr(i), z_arr(i), initial_D2G[dust_id], Stokes_number[dust_id], eta_gas(i));
-          Real vel_dust_phi    = vel_K_sph(i) + VelProfileCyl_NSH_phi_dust(rad_arr(i), phi_arr(i), z_arr(i), initial_D2G[dust_id], Stokes_number[dust_id], eta_gas(i));
-          vel_dust_phi        -= orb_defined*vel_K(i);
-          Real vel_dust_r      = vel_dust_cyl*std::sin(x2);
-          Real vel_dust_theta  = vel_dust_cyl*std::cos(x2);
-          //*/
-
-          Real vel_dust_r      = w(IM1, k, j, i);              
-          Real vel_dust_theta  = w(IM2, k, j, i);
-          Real vel_dust_phi    = w(IM3, k, j, i);
-
-          Real &dust_rho  = prim_df(rho_id, k, j, i);
-          Real &dust_vel1 = prim_df(v1_id,  k, j, i);
-          Real &dust_vel2 = prim_df(v2_id,  k, j, i);
-          Real &dust_vel3 = prim_df(v3_id,  k, j, i);
-
-          Real &dust_dens = cons_df(rho_id, k, j, i);
-          Real &dust_mom1 = cons_df(v1_id,  k, j, i);
-          Real &dust_mom2 = cons_df(v2_id,  k, j, i);
-          Real &dust_mom3 = cons_df(v3_id,  k, j, i);
-
-          dust_rho  = den_dust;
-          dust_vel1 = vel_dust_r;
-          dust_vel2 = vel_dust_theta;
-          dust_vel3 = vel_dust_phi;
-
-          dust_dens = den_dust;
-          dust_mom1 = den_dust*vel_dust_r;
-          dust_mom2 = den_dust*vel_dust_theta;
-          dust_mom3 = den_dust*vel_dust_phi;
+        for (int i=pmb->is; i<=pmb->ie; ++i) {
+          cons_df(rho_id,   k, j, i) = d2g*u(IDN, k, j, i);
+          cons_df(rho_id+1, k, j, i) = d2g*u(IM1, k, j, i);
+          cons_df(rho_id+2, k, j, i) = d2g*u(IM2, k, j, i);
+          cons_df(rho_id+3, k, j, i) = d2g*u(IM3, k, j, i);
         }
       }
     }
   }
-  return;
+  // no diffusive momentum while dust is pinned (dust diffusion is not computed)
+  if (pmb->pdustfluids->dfdif.dustfluids_diffusion_defined)
+    pmb->pdustfluids->dfccdif.diff_mom_cc.ZeroClear();
+}
+
+void PostUpdate(MeshBlock *pmb, const Real t_start, const Real t_end,
+    const Real dt, const int stage, const bool final_stage, const bool final_main_stage) {
+  (void)t_start; (void)t_end; (void)dt; (void)stage; (void)final_stage; (void)final_main_stage;
+  PinDustBeforeRelease(pmb);
 }
 
 
@@ -2064,10 +2011,7 @@ void MeshBlock::UserWorkInLoop() {
   if (Isothermal_Flag)
     LocalIsothermalEOS(this, il, iu, jl, ju, kl, ku, phydro->w, phydro->u);
   
-  // RL: fixed dust for a few more cycles to make boundaries adapting to current flow
-  if ((NDUSTFLUIDS > 0) && (time_drag != 0.0) && (time < time_drag + 0.01))
-    FixedDust(this, il, iu, jl, ju, kl, ku, phydro->w, pdustfluids->df_w,
-                                            phydro->u, pdustfluids->df_u);
+  // Pre-release dust pinning is done in PostUpdate, before ghost filling.
    
   if ((NDUSTFLUIDS > 0) && (dust_percent_floor > 0.0))
     DustDensityPercentFloor(this, il, iu, jl, ju, kl, ku,
@@ -2085,47 +2029,7 @@ void Mesh::UserWorkInLoop() {
   // RL: note that each node may have different number of meshblocks; thus, analyses
   // that involving all meshblocks and MPI_Reduce will need to be done here. 
 
-  if (time >= time_drag) {
-    // this assume time always >= 0, so the other branch only takes effect when time_drag>0
-    Globals::local_ndustfluids_inte = NDUSTFLUIDS;  // release dust
-  } else {
-    /* RL: When I initially implement this for the old setup, it seem to work fine.
-     *     Then, I tried more refinement levels and things got muddy, where dt
-     *     became too tiny to move simulation forward. But when I restarted the 
-     *     simulation, dt did not get tiny as soon as the original simulation; it
-     *     only broke after a while. I think there are actually two reasons that makes
-     *     dt tiny: 
-     *         (1) when I use high resolution and small softening, and when dust is
-     *     released, dust---as a pressureless fluid---falls into the potential well
-     *     too fast, causing shells of vacuum regions as dust closer to the planet move
-     *     faster than dust farther away. Both the vacuum regions and the fast infall
-     *     speed lead to tiny dt. This point has basically been fixed by setting a 
-     *     density/velocity floor (see the pgen file).
-     *         (2) when I don't evolve dust fluid for long and then suddenly release
-     *     dust fluid for calculations, there are a huge discontinuities between the
-     *     active zones and the ghost zones, which are still computed from initial 
-     *     conditions. Such jumps break simulations. Previously, this was fine as dust
-     *     velocity is fixed to initial conditions, so the jumps might be smaller.
-     *     But I changed FixedDust to make dust follow gas velocities when during my
-     *     debugging for point (1) above.
-     *     
-     *     As an attempt to fix point (2), now I decide to turn dust fluid back on 
-     *     every 2048 cycles, which should be able to update ghost zones and all relevant
-     *     quantities before significant discontinuities appear, while the remaining cycles
-     *     should still be able to save some computational cost on dust fluids. This may
-     *     also solve the issue that a restarted simulation cannot benefit from this.
-     *       UPDATE: I found an duty cycle of 1/2048 only works for St=0.1 and a smaller 
-     *               St requires a higher duty cycle. So now we obtain this number from
-     *               the input file "duty_cycle_b4time_drag". The empirical value can be 
-     *               computed from std::clamp(static_cast<int>(10240 * St), 16, 1024);
-     *               Here for safety, we use 32 by default.
-     */
-    if ((ncycle <= 1) || (ncycle % duty_cycle_b4time_drag == 0)) {
-      Globals::local_ndustfluids_inte = NDUSTFLUIDS; // switch back on most dust fluid calculations
-    } else {
-      Globals::local_ndustfluids_inte = 0; // switch off most dust fluid calculations
-    }
-  }
+  // Dust evolution uses the cycle-start release predicate, not a duty-cycle switch.
 
   return;
 }

@@ -123,7 +123,7 @@ Mesh::Mesh(ParameterInput *pin, int mesh_test) :
     MeshGenerator_{UniformMeshGeneratorX1, UniformMeshGeneratorX2,
                    UniformMeshGeneratorX3},
     BoundaryFunction_{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr},
-    AMRFlag_{}, UserSourceTerm_{}, UserStoppingTime_{}, UserTimeStep_{},
+    AMRFlag_{}, UserSourceTerm_{}, UserPostUpdate_{}, UserStoppingTime_{}, UserTimeStep_{},
     ViscosityCoeff_{}, ConductionCoeff_{}, FieldDiffusivity_{}, DustDiffusivity_{},
     OrbitalVelocity_{}, OrbitalVelocityDerivative_{nullptr, nullptr},
     MGGravityBoundaryFunction_{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr},
@@ -625,7 +625,7 @@ Mesh::Mesh(ParameterInput *pin, IOWrapper& resfile, int mesh_test) :
     MeshGenerator_{UniformMeshGeneratorX1, UniformMeshGeneratorX2,
                    UniformMeshGeneratorX3},
     BoundaryFunction_{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr},
-    AMRFlag_{}, UserSourceTerm_{}, UserStoppingTime_{}, UserTimeStep_{},
+    AMRFlag_{}, UserSourceTerm_{}, UserPostUpdate_{}, UserStoppingTime_{}, UserTimeStep_{},
     ViscosityCoeff_{}, ConductionCoeff_{}, FieldDiffusivity_{}, DustDiffusivity_{},
     OrbitalVelocity_{}, OrbitalVelocityDerivative_{nullptr, nullptr},
     MGGravityBoundaryFunction_{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr},
@@ -1155,6 +1155,12 @@ void Mesh::NewTimeStep() {
   dt_hyperbolic = pmb->new_block_dt_hyperbolic_;
   dt_parabolic = pmb->new_block_dt_parabolic_;
   dt_user = pmb->new_block_dt_user_;
+  // Dust constraints apply only to cycles in which dust is evolved, i.e. those starting at
+  // or after dust/time_drag. time is always the start of the cycle that will use this dt
+  // (after time += dt in the main loop, or in Initialize), so continuous runs, regrids and
+  // restarts make the same choice.
+  const bool dust_dt = (NDUSTFLUIDS > 0) && (pmb->pdustfluids->dfdrag.time_drag == 0.0
+                       || time >= pmb->pdustfluids->dfdrag.time_drag);
 
   for (int i=0; i<nblocal; ++i) {
     pmb = my_blocks(i);
@@ -1162,6 +1168,12 @@ void Mesh::NewTimeStep() {
     dt_hyperbolic  = std::min(dt_hyperbolic, pmb->new_block_dt_hyperbolic_);
     dt_parabolic  = std::min(dt_parabolic, pmb->new_block_dt_parabolic_);
     dt_user  = std::min(dt_user, pmb->new_block_dt_user_);
+    if (dust_dt) {
+      dt = std::min(dt, pmb->new_block_dt_dust_hyperbolic_);
+      if (!STS_ENABLED) dt = std::min(dt, pmb->new_block_dt_dust_parabolic_);
+      dt_hyperbolic = std::min(dt_hyperbolic, pmb->new_block_dt_dust_hyperbolic_);
+      dt_parabolic = std::min(dt_parabolic, pmb->new_block_dt_dust_parabolic_);
+    }
   }
 
 #ifdef MPI_PARALLEL
@@ -1382,6 +1394,15 @@ void Mesh::EnrollUserMeshGenerator(CoordinateDirection dir, MeshGenFunc my_mg) {
 
 void Mesh::EnrollUserExplicitSourceFunction(SrcTermFunc my_func) {
   UserSourceTerm_ = my_func;
+  return;
+}
+
+//----------------------------------------------------------------------------------------
+//! \fn void Mesh::EnrollUserPostUpdateFunction(PostUpdateFunc my_func)
+//! \brief Enroll work that must modify the final stage state before boundary exchange
+
+void Mesh::EnrollUserPostUpdateFunction(PostUpdateFunc my_func) {
+  UserPostUpdate_ = my_func;
   return;
 }
 

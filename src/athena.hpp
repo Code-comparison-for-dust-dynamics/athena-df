@@ -198,6 +198,9 @@ using SrcTermFunc = void (*)(
     MeshBlock *pmb, const Real time, const Real dt, const AthenaArray<Real> &prim,
     const AthenaArray<Real> &prim_df, const AthenaArray<Real> &prim_scalar, const AthenaArray<Real> &bcc,
     AthenaArray<Real> &cons, AthenaArray<Real> &cons_df, AthenaArray<Real> &cons_scalar);
+using PostUpdateFunc = void (*)(MeshBlock *pmb, const Real t_start, const Real t_end,
+                               const Real dt, const int stage, const bool final_stage,
+                               const bool final_main_stage);
 using TimeStepFunc = Real (*)(MeshBlock *pmb);
 using HistoryOutputFunc = Real (*)(MeshBlock *pmb, int iout);
 using MetricFunc = void (*)(
