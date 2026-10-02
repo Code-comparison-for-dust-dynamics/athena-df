@@ -137,18 +137,18 @@ int IsBigEndianOutput();
 
 void LocalIsothermalEOS(MeshBlock *pmb, int il, int iu, int jl,
     int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons);
-void InnerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons);
-void OuterWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons);
-void UpperWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons);
-void LowerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons);
-void InnerWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim_df, AthenaArray<Real> &cons_df);
-void OuterWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim_df, AthenaArray<Real> &cons_df);
+void InnerWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons);
+void OuterWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons);
+void UpperWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons);
+void LowerWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons);
+void InnerWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons_df);
+void OuterWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons_df);
 void PinDustBeforeRelease(MeshBlock *pmb);
 void PostUpdate(MeshBlock *pmb, const Real t_start, const Real t_end,
     const Real dt, const int stage, const bool final_stage, const bool final_main_stage);
@@ -1316,11 +1316,92 @@ void LocalIsothermalEOS(MeshBlock *pmb, int il, int iu, int jl,
 }
 
 
-void InnerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons) {
+// The damping operators act on conserved variables in the post-update task, before the
+// boundary exchange, so restarted and uninterrupted runs see the same ghost states.
+inline void DampGasConservedCell(AthenaArray<Real> &cons, const int k, const int j,
+    const int i, const Real rho_0, const Real vel1_0, const Real vel2_0,
+    const Real vel3_0, const Real pressure_0, const Real damping_factor,
+    const Real gm1, const Real density_floor, const Real pressure_floor,
+    const Real internal_energy_floor) {
+  Real &density = cons(IDN, k, j, i);
+  Real &mom1 = cons(IM1, k, j, i);
+  Real &mom2 = cons(IM2, k, j, i);
+  Real &mom3 = cons(IM3, k, j, i);
+  Real &energy = cons(IEN, k, j, i);
+
+  // Reproduce the EOS floors that preceded the old UserWorkInLoop damping path.
+  density = (density > density_floor) ? density : density_floor;
+  Real inv_density = 1.0/density;
+  Real vel1 = mom1*inv_density;
+  Real vel2 = mom2*inv_density;
+  Real vel3 = mom3*inv_density;
+  Real kinetic = 0.5*inv_density*(SQR(mom1) + SQR(mom2) + SQR(mom3));
+  Real pressure = gm1*(energy - kinetic);
+  Real energy_floor = internal_energy_floor + kinetic;
+  if (!(energy > energy_floor)) {
+    pressure = pressure_floor;
+    energy = energy_floor;
+  }
+
+  density += (rho_0 - density)*damping_factor;
+  vel1 += (vel1_0 - vel1)*damping_factor;
+  vel2 += (vel2_0 - vel2)*damping_factor;
+  vel3 += (vel3_0 - vel3)*damping_factor;
+  pressure += (pressure_0 - pressure)*damping_factor;
+
+  mom1 = density*vel1;
+  mom2 = density*vel2;
+  mom3 = density*vel3;
+  kinetic = 0.5*(SQR(mom1) + SQR(mom2) + SQR(mom3))/density;
+  energy = pressure/gm1 + kinetic;
+}
+
+inline void DampDustConservedCell(MeshBlock *pmb, AthenaArray<Real> &cons_df,
+    const int dust_id, const int k, const int j, const int i, const Real rho_0,
+    const Real vel1_0, const Real vel2_0, const Real vel3_0,
+    const Real damping_factor) {
+  DustFluids *pdf = pmb->pdustfluids;
+  int rho_id = 4*dust_id;
+  int v1_id = rho_id + 1;
+  int v2_id = rho_id + 2;
+  int v3_id = rho_id + 3;
+
+  Real &density = cons_df(rho_id, k, j, i);
+  Real &mom1 = cons_df(v1_id, k, j, i);
+  Real &mom2 = cons_df(v2_id, k, j, i);
+  Real &mom3 = cons_df(v3_id, k, j, i);
+  density = (density > pmb->peos->GetDustFluidsFloor(dust_id))
+            ? density : pmb->peos->GetDustFluidsFloor(dust_id);
+
+  // Conserved dust momentum includes the diffusion momentum. Damp the physical velocity
+  // and keep the diffusion momentum unchanged until the diffusion operator recomputes it.
+  const bool with_diff = pdf->dfdif.MomentumIncludesDiffusion();
+  const Real diff_mom1 = with_diff ? pdf->dfccdif.diff_mom_cc(v1_id, k, j, i) : 0.0;
+  const Real diff_mom2 = with_diff ? pdf->dfccdif.diff_mom_cc(v2_id, k, j, i) : 0.0;
+  const Real diff_mom3 = with_diff ? pdf->dfccdif.diff_mom_cc(v3_id, k, j, i) : 0.0;
+  Real inv_density = 1.0/density;
+  Real vel1 = (mom1 - diff_mom1)*inv_density;
+  Real vel2 = (mom2 - diff_mom2)*inv_density;
+  Real vel3 = (mom3 - diff_mom3)*inv_density;
+
+  density += (rho_0 - density)*damping_factor;
+  vel1 += (vel1_0 - vel1)*damping_factor;
+  vel2 += (vel2_0 - vel2)*damping_factor;
+  vel3 += (vel3_0 - vel3)*damping_factor;
+
+  mom1 = density*vel1 + diff_mom1;
+  mom2 = density*vel2 + diff_mom2;
+  mom3 = density*vel3 + diff_mom3;
+}
+
+void InnerWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons) {
 
   Real gamma = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(gamma - 1.0);
+  Real gm1 = gamma - 1.0;
+  Real density_floor = pmb->peos->GetDensityFloor();
+  Real pressure_floor = pmb->peos->GetPressureFloor();
+  Real internal_energy_floor = pressure_floor/gm1;
 
   Real inv_inner_damp = 1.0/inner_width_damping;
   Real inv_outer_damp = 1.0/outer_width_damping;
@@ -1369,37 +1450,11 @@ void InnerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
           Real gas_vel3_0 = vel_gas_phi;
           Real gas_pre_0  = cs_square_0*gas_rho_0;
 
-          Real &gas_rho  = prim(IDN, k, j, i);
-          Real &gas_vel1 = prim(IM1, k, j, i);
-          Real &gas_vel2 = prim(IM2, k, j, i);
-          Real &gas_vel3 = prim(IM3, k, j, i);
-          Real &gas_pre  = prim(IPR, k, j, i);
-
-          Real &gas_dens = cons(IDN, k, j, i);
-          Real &gas_mom1 = cons(IM1, k, j, i);
-          Real &gas_mom2 = cons(IM2, k, j, i);
-          Real &gas_mom3 = cons(IM3, k, j, i);
-          Real &gas_erg  = cons(IEN, k, j, i);
-
-          Real delta_gas_rho  = (gas_rho_0  - gas_rho )*R_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel1 = (gas_vel1_0 - gas_vel1)*R_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel2 = (gas_vel2_0 - gas_vel2)*R_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel3 = (gas_vel3_0 - gas_vel3)*R_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_pre  = (gas_pre_0  - gas_pre )*R_func(i)*inv_damping_tau(i)*dt;
-
-          gas_rho  += delta_gas_rho;
-          gas_vel1 += delta_gas_vel1;
-          gas_vel2 += delta_gas_vel2;
-          gas_vel3 += delta_gas_vel3;
-          gas_pre  += delta_gas_pre;
-
-          gas_dens = gas_rho;
-          gas_mom1 = gas_dens*gas_vel1;
-          gas_mom2 = gas_dens*gas_vel2;
-          gas_mom3 = gas_dens*gas_vel3;
-
-          Real Ek = 0.5*(SQR(gas_mom1) + SQR(gas_mom2) + SQR(gas_mom3));
-          gas_erg = gas_pre*igm1 + Ek/gas_dens;
+          Real damping_factor = R_func(i)*inv_damping_tau(i)*dt;
+          DampGasConservedCell(cons, k, j, i, gas_rho_0, gas_vel1_0,
+                               gas_vel2_0, gas_vel3_0, gas_pre_0,
+                               damping_factor, gm1, density_floor, pressure_floor,
+                               internal_energy_floor);
         }
       }
     }
@@ -1408,11 +1463,14 @@ void InnerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
 }
 
 
-void OuterWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons) {
+void OuterWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons) {
 
   Real gamma = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(gamma - 1.0);
+  Real gm1 = gamma - 1.0;
+  Real density_floor = pmb->peos->GetDensityFloor();
+  Real pressure_floor = pmb->peos->GetPressureFloor();
+  Real internal_energy_floor = pressure_floor/gm1;
 
   Real inv_inner_damp = 1.0/inner_width_damping;
   Real inv_outer_damp = 1.0/outer_width_damping;
@@ -1461,37 +1519,11 @@ void OuterWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
           Real gas_vel3_0 = vel_gas_phi;
           Real gas_pre_0  = cs_square_0*gas_rho_0;
 
-          Real &gas_rho  = prim(IDN, k, j, i);
-          Real &gas_vel1 = prim(IM1, k, j, i);
-          Real &gas_vel2 = prim(IM2, k, j, i);
-          Real &gas_vel3 = prim(IM3, k, j, i);
-          Real &gas_pre  = prim(IPR, k, j, i);
-
-          Real &gas_dens = cons(IDN, k, j, i);
-          Real &gas_mom1 = cons(IM1, k, j, i);
-          Real &gas_mom2 = cons(IM2, k, j, i);
-          Real &gas_mom3 = cons(IM3, k, j, i);
-          Real &gas_erg  = cons(IEN, k, j, i);
-
-          Real delta_gas_rho  = (gas_rho_0  - gas_rho )*R_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel1 = (gas_vel1_0 - gas_vel1)*R_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel2 = (gas_vel2_0 - gas_vel2)*R_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel3 = (gas_vel3_0 - gas_vel3)*R_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_pre  = (gas_pre_0  - gas_pre )*R_func(i)*inv_damping_tau(i)*dt;
-
-          gas_rho  += delta_gas_rho;
-          gas_vel1 += delta_gas_vel1;
-          gas_vel2 += delta_gas_vel2;
-          gas_vel3 += delta_gas_vel3;
-          gas_pre  += delta_gas_pre;
-
-          gas_dens = gas_rho;
-          gas_mom1 = gas_dens*gas_vel1;
-          gas_mom2 = gas_dens*gas_vel2;
-          gas_mom3 = gas_dens*gas_vel3;
-
-          Real Ek = 0.5*(SQR(gas_mom1) + SQR(gas_mom2) + SQR(gas_mom3));
-          gas_erg = gas_pre*igm1 + Ek/gas_dens;
+          Real damping_factor = R_func(i)*inv_damping_tau(i)*dt;
+          DampGasConservedCell(cons, k, j, i, gas_rho_0, gas_vel1_0,
+                               gas_vel2_0, gas_vel3_0, gas_pre_0,
+                               damping_factor, gm1, density_floor, pressure_floor,
+                               internal_energy_floor);
         }
       }
     }
@@ -1500,11 +1532,14 @@ void OuterWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
 }
 
 
-void UpperWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons) {
+void UpperWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons) {
 
   Real gamma = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(gamma - 1.0);
+  Real gm1 = gamma - 1.0;
+  Real density_floor = pmb->peos->GetDensityFloor();
+  Real pressure_floor = pmb->peos->GetPressureFloor();
+  Real internal_energy_floor = pressure_floor/gm1;
 
   Real inv_upper_damp = 1.0/upper_altitude_damping;
   Real inv_lower_damp = 1.0/lower_altitude_damping;
@@ -1553,37 +1588,11 @@ void UpperWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
           Real gas_vel3_0 = vel_gas_phi;
           Real gas_pre_0  = cs_square_0*gas_rho_0;
 
-          Real &gas_rho  = prim(IDN, k, j, i);
-          Real &gas_vel1 = prim(IM1, k, j, i);
-          Real &gas_vel2 = prim(IM2, k, j, i);
-          Real &gas_vel3 = prim(IM3, k, j, i);
-          Real &gas_pre  = prim(IPR, k, j, i);
-
-          Real &gas_dens = cons(IDN, k, j, i);
-          Real &gas_mom1 = cons(IM1, k, j, i);
-          Real &gas_mom2 = cons(IM2, k, j, i);
-          Real &gas_mom3 = cons(IM3, k, j, i);
-          Real &gas_erg  = cons(IEN, k, j, i);
-
-          Real delta_gas_rho  = (gas_rho_0  - gas_rho )*Theta_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel1 = (gas_vel1_0 - gas_vel1)*Theta_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel2 = (gas_vel2_0 - gas_vel2)*Theta_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel3 = (gas_vel3_0 - gas_vel3)*Theta_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_pre  = (gas_pre_0  - gas_pre )*Theta_func(i)*inv_damping_tau(i)*dt;
-
-          gas_rho  += delta_gas_rho;
-          gas_vel1 += delta_gas_vel1;
-          gas_vel2 += delta_gas_vel2;
-          gas_vel3 += delta_gas_vel3;
-          gas_pre  += delta_gas_pre;
-
-          gas_dens = gas_rho;
-          gas_mom1 = gas_dens*gas_vel1;
-          gas_mom2 = gas_dens*gas_vel2;
-          gas_mom3 = gas_dens*gas_vel3;
-
-          Real Ek = 0.5*(SQR(gas_mom1) + SQR(gas_mom2) + SQR(gas_mom3));
-          gas_erg = gas_pre*igm1 + Ek/gas_dens;
+          Real damping_factor = R_func(i)*inv_damping_tau(i)*dt;
+          DampGasConservedCell(cons, k, j, i, gas_rho_0, gas_vel1_0,
+                               gas_vel2_0, gas_vel3_0, gas_pre_0,
+                               damping_factor, gm1, density_floor, pressure_floor,
+                               internal_energy_floor);
         }
       }
     }
@@ -1592,11 +1601,14 @@ void UpperWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
 }
 
 
-void LowerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim, AthenaArray<Real> &cons) {
+void LowerWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons) {
 
   Real gamma = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(gamma - 1.0);
+  Real gm1 = gamma - 1.0;
+  Real density_floor = pmb->peos->GetDensityFloor();
+  Real pressure_floor = pmb->peos->GetPressureFloor();
+  Real internal_energy_floor = pressure_floor/gm1;
 
   Real inv_upper_damp = 1.0/upper_altitude_damping;
   Real inv_lower_damp = 1.0/lower_altitude_damping;
@@ -1645,37 +1657,11 @@ void LowerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
           Real gas_vel3_0 = vel_gas_phi;
           Real gas_pre_0  = cs_square_0*gas_rho_0;
 
-          Real &gas_rho  = prim(IDN, k, j, i);
-          Real &gas_vel1 = prim(IM1, k, j, i);
-          Real &gas_vel2 = prim(IM2, k, j, i);
-          Real &gas_vel3 = prim(IM3, k, j, i);
-          Real &gas_pre  = prim(IPR, k, j, i);
-
-          Real &gas_dens = cons(IDN, k, j, i);
-          Real &gas_mom1 = cons(IM1, k, j, i);
-          Real &gas_mom2 = cons(IM2, k, j, i);
-          Real &gas_mom3 = cons(IM3, k, j, i);
-          Real &gas_erg  = cons(IEN, k, j, i);
-
-          Real delta_gas_rho  = (gas_rho_0  - gas_rho )*Theta_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel1 = (gas_vel1_0 - gas_vel1)*Theta_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel2 = (gas_vel2_0 - gas_vel2)*Theta_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_vel3 = (gas_vel3_0 - gas_vel3)*Theta_func(i)*inv_damping_tau(i)*dt;
-          Real delta_gas_pre  = (gas_pre_0  - gas_pre )*Theta_func(i)*inv_damping_tau(i)*dt;
-
-          gas_rho  += delta_gas_rho;
-          gas_vel1 += delta_gas_vel1;
-          gas_vel2 += delta_gas_vel2;
-          gas_vel3 += delta_gas_vel3;
-          gas_pre  += delta_gas_pre;
-
-          gas_dens = gas_rho;
-          gas_mom1 = gas_dens*gas_vel1;
-          gas_mom2 = gas_dens*gas_vel2;
-          gas_mom3 = gas_dens*gas_vel3;
-
-          Real Ek = 0.5*(SQR(gas_mom1) + SQR(gas_mom2) + SQR(gas_mom3));
-          gas_erg = gas_pre*igm1 + Ek/gas_dens;
+          Real damping_factor = R_func(i)*inv_damping_tau(i)*dt;
+          DampGasConservedCell(cons, k, j, i, gas_rho_0, gas_vel1_0,
+                               gas_vel2_0, gas_vel3_0, gas_pre_0,
+                               damping_factor, gm1, density_floor, pressure_floor,
+                               internal_energy_floor);
         }
       }
     }
@@ -1684,11 +1670,8 @@ void LowerWaveDampingGas(MeshBlock *pmb, const Real time, const Real dt, int il,
 }
 
 
-void InnerWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim_df, AthenaArray<Real> &cons_df) {
-
-  Real mygam = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(mygam - 1.0);
+void InnerWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons_df) {
 
   Real inv_inner_damp = 1.0/inner_width_damping;
   Real inv_outer_damp = 1.0/outer_width_damping;
@@ -1734,7 +1717,7 @@ void InnerWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il
             Real cs_square_0 = PoverRho(rad_arr(i), phi_arr(i), z_arr(i));
             Real eta_gas     = 0.5*(qvalue + pvalue)*cs_square_0/SQR(rad_arr(i)*omega_dyn(i));
             //Real vel_K_sph   = std::sqrt(gm0/x1);
-            Real vel_K_sph   = vel_K_sph;
+            Real vel_K_sph   = rad_arr(i)*omega_dyn(i);
 
             Real vel_K           = vK(pmb->porb, x1, x2, x3);
             Real vel_dust_cyl    = VelProfileCyl_NSH_rad_dust(rad_arr(i), phi_arr(i), z_arr(i), initial_D2G[dust_id], Stokes_number[dust_id], eta_gas);
@@ -1748,30 +1731,10 @@ void InnerWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il
             Real dust_vel2_0 = vel_dust_theta;
             Real dust_vel3_0 = vel_dust_phi;
 
-            Real &dust_rho  = prim_df(rho_id, k, j, i);
-            Real &dust_vel1 = prim_df(v1_id,  k, j, i);
-            Real &dust_vel2 = prim_df(v2_id,  k, j, i);
-            Real &dust_vel3 = prim_df(v3_id,  k, j, i);
-
-            Real &dust_dens = cons_df(rho_id, k, j, i);
-            Real &dust_mom1 = cons_df(v1_id,  k, j, i);
-            Real &dust_mom2 = cons_df(v2_id,  k, j, i);
-            Real &dust_mom3 = cons_df(v3_id,  k, j, i);
-
-            Real delta_dust_rho  = (dust_rho_0  - dust_rho )*R_func(i)*inv_damping_tau(i)*dt;
-            Real delta_dust_vel1 = (dust_vel1_0 - dust_vel1)*R_func(i)*inv_damping_tau(i)*dt;
-            Real delta_dust_vel2 = (dust_vel2_0 - dust_vel2)*R_func(i)*inv_damping_tau(i)*dt;
-            Real delta_dust_vel3 = (dust_vel3_0 - dust_vel3)*R_func(i)*inv_damping_tau(i)*dt;
-
-            dust_rho  += delta_dust_rho;
-            dust_vel1 += delta_dust_vel1;
-            dust_vel2 += delta_dust_vel2;
-            dust_vel3 += delta_dust_vel3;
-
-            dust_dens = dust_rho;
-            dust_mom1 = dust_dens*dust_vel1;
-            dust_mom2 = dust_dens*dust_vel2;
-            dust_mom3 = dust_dens*dust_vel3;
+            Real damping_factor = R_func(i)*inv_damping_tau(i)*dt;
+            DampDustConservedCell(pmb, cons_df, dust_id, k, j, i, dust_rho_0,
+                                  dust_vel1_0, dust_vel2_0, dust_vel3_0,
+                                  damping_factor);
           }
         }
       }
@@ -1781,11 +1744,8 @@ void InnerWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il
 }
 
 
-void OuterWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il, int iu,
-    int jl, int ju, int kl, int ku, AthenaArray<Real> &prim_df, AthenaArray<Real> &cons_df) {
-
-  Real mygam = pmb->peos->GetGamma();
-  Real igm1  = 1.0/(mygam - 1.0);
+void OuterWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
+    int jl, int ju, int kl, int ku, AthenaArray<Real> &cons_df) {
 
   Real inv_inner_damp = 1.0/inner_width_damping;
   Real inv_outer_damp = 1.0/outer_width_damping;
@@ -1845,30 +1805,10 @@ void OuterWaveDampingDust(MeshBlock *pmb, const Real time, const Real dt, int il
             Real dust_vel2_0 = vel_dust_theta;
             Real dust_vel3_0 = vel_dust_phi;
 
-            Real &dust_rho  = prim_df(rho_id, k, j, i);
-            Real &dust_vel1 = prim_df(v1_id,  k, j, i);
-            Real &dust_vel2 = prim_df(v2_id,  k, j, i);
-            Real &dust_vel3 = prim_df(v3_id,  k, j, i);
-
-            Real &dust_dens = cons_df(rho_id, k, j, i);
-            Real &dust_mom1 = cons_df(v1_id,  k, j, i);
-            Real &dust_mom2 = cons_df(v2_id,  k, j, i);
-            Real &dust_mom3 = cons_df(v3_id,  k, j, i);
-
-            Real delta_dust_rho  = (dust_rho_0  - dust_rho )*R_func(i)*inv_damping_tau(i)*dt;
-            Real delta_dust_vel1 = (dust_vel1_0 - dust_vel1)*R_func(i)*inv_damping_tau(i)*dt;
-            Real delta_dust_vel2 = (dust_vel2_0 - dust_vel2)*R_func(i)*inv_damping_tau(i)*dt;
-            Real delta_dust_vel3 = (dust_vel3_0 - dust_vel3)*R_func(i)*inv_damping_tau(i)*dt;
-
-            dust_rho  += delta_dust_rho;
-            dust_vel1 += delta_dust_vel1;
-            dust_vel2 += delta_dust_vel2;
-            dust_vel3 += delta_dust_vel3;
-
-            dust_dens = dust_rho;
-            dust_mom1 = dust_dens*dust_vel1;
-            dust_mom2 = dust_dens*dust_vel2;
-            dust_mom3 = dust_dens*dust_vel3;
+            Real damping_factor = R_func(i)*inv_damping_tau(i)*dt;
+            DampDustConservedCell(pmb, cons_df, dust_id, k, j, i, dust_rho_0,
+                                  dust_vel1_0, dust_vel2_0, dust_vel3_0,
+                                  damping_factor);
           }
         }
       }
@@ -1908,8 +1848,29 @@ void PinDustBeforeRelease(MeshBlock *pmb) {
 
 void PostUpdate(MeshBlock *pmb, const Real t_start, const Real t_end,
     const Real dt, const int stage, const bool final_stage, const bool final_main_stage) {
-  (void)t_start; (void)t_end; (void)dt; (void)stage; (void)final_stage; (void)final_main_stage;
-  PinDustBeforeRelease(pmb);
+  (void)t_start; (void)t_end; (void)dt; (void)stage; (void)final_stage;
+  // Damping must precede the final OA-only stage. That stage performs the last standard
+  // boundary exchange/prolongation and leaves restart-rebuilt SMR ghost states identical to
+  // uninterrupted evolution. It acts once per cycle with the cycle timestep.
+  if (final_main_stage) {
+    Real cycle_dt = pmb->pmy_mesh->dt;
+    int il = pmb->is, iu = pmb->ie, jl = pmb->js, ju = pmb->je, kl = pmb->ks, ku = pmb->ke;
+    if (Inner_Gas_Damping_Flag)
+      InnerWaveDampingGas(pmb, cycle_dt, il, iu, jl, ju, kl, ku, pmb->phydro->u);
+    if (Outer_Gas_Damping_Flag)
+      OuterWaveDampingGas(pmb, cycle_dt, il, iu, jl, ju, kl, ku, pmb->phydro->u);
+    if (Theta_Gas_Damping_Flag) {
+      UpperWaveDampingGas(pmb, cycle_dt, il, iu, jl, ju, kl, ku, pmb->phydro->u);
+      LowerWaveDampingGas(pmb, cycle_dt, il, iu, jl, ju, kl, ku, pmb->phydro->u);
+    }
+    if (NDUSTFLUIDS > 0) {
+      if (Inner_Dust_Damping_Flag)
+        InnerWaveDampingDust(pmb, cycle_dt, il, iu, jl, ju, kl, ku, pmb->pdustfluids->df_u);
+      if (Outer_Dust_Damping_Flag)
+        OuterWaveDampingDust(pmb, cycle_dt, il, iu, jl, ju, kl, ku, pmb->pdustfluids->df_u);
+    }
+  }
+  PinDustBeforeRelease(pmb);  // after the gas damping, so dust follows the final gas state
 }
 
 
@@ -1987,26 +1948,7 @@ void MeshBlock::UserWorkInLoop() {
   int il = is - NGHOST;
   int iu = ie + NGHOST;
 
-  if (Inner_Gas_Damping_Flag)
-    InnerWaveDampingGas(this, time, dt, il, iu, jl, ju, kl, ku, phydro->w, phydro->u);
-
-  if (Outer_Gas_Damping_Flag)
-    OuterWaveDampingGas(this, time, dt, il, iu, jl, ju, kl, ku, phydro->w, phydro->u);
-
-  if (Theta_Gas_Damping_Flag) {
-    UpperWaveDampingGas(this, time, dt, il, iu, jl, ju, kl, ku, phydro->w, phydro->u);
-    LowerWaveDampingGas(this, time, dt, il, iu, jl, ju, kl, ku, phydro->w, phydro->u);
-  }
-
-  if (NDUSTFLUIDS > 0) {
-    if (Inner_Dust_Damping_Flag)
-      InnerWaveDampingDust(this, time, dt, il, iu, jl, ju, kl, ku,
-          pdustfluids->df_w, pdustfluids->df_u);
-
-    if (Outer_Dust_Damping_Flag)
-      OuterWaveDampingDust(this, time, dt, il, iu, jl, ju, kl, ku,
-          pdustfluids->df_w, pdustfluids->df_u);
-  }
+  // Wave damping is done in PostUpdate, on active cells before the boundary exchange.
 
   if (Isothermal_Flag)
     LocalIsothermalEOS(this, il, iu, jl, ju, kl, ku, phydro->w, phydro->u);
