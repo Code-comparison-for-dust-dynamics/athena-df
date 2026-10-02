@@ -101,9 +101,9 @@ void DustGasDrag::ExplicitFeedback(const int stage,
 
           if (Drag_WorkDissipation) {
             inv_dust_dens     = 1.0/dust_dens;
-            dust_vel1_bf_drag = dust_mom1*inv_dust_dens;
-            dust_vel2_bf_drag = dust_mom2*inv_dust_dens;
-            dust_vel3_bf_drag = dust_mom3*inv_dust_dens;
+            dust_vel1_bf_drag = (dust_mom1 - DustDiffusionMom(v1_id, k, j, i))*inv_dust_dens;
+            dust_vel2_bf_drag = (dust_mom2 - DustDiffusionMom(v2_id, k, j, i))*inv_dust_dens;
+            dust_vel3_bf_drag = (dust_mom3 - DustDiffusionMom(v3_id, k, j, i))*inv_dust_dens;
           }
 
           // Add the delta momentum caused by drags on dust conserves
@@ -115,9 +115,9 @@ void DustGasDrag::ExplicitFeedback(const int stage,
           // dE_gas = dM_dust*(v_dust_before + v_dust_after)/2
           if (Drag_WorkDissipation) {
             // Calculate the dust velocity after drags
-            Real dust_vel1_af_drag = dust_mom1*inv_dust_dens;
-            Real dust_vel2_af_drag = dust_mom2*inv_dust_dens;
-            Real dust_vel3_af_drag = dust_mom3*inv_dust_dens;
+            Real dust_vel1_af_drag = (dust_mom1 - DustDiffusionMom(v1_id, k, j, i))*inv_dust_dens;
+            Real dust_vel2_af_drag = (dust_mom2 - DustDiffusionMom(v2_id, k, j, i))*inv_dust_dens;
+            Real dust_vel3_af_drag = (dust_mom3 - DustDiffusionMom(v3_id, k, j, i))*inv_dust_dens;
 
             Real dissipation = 0.5*(delta_mom1(n, i)*(dust_vel1_bf_drag + dust_vel1_af_drag) +
                                     delta_mom2(n, i)*(dust_vel2_bf_drag + dust_vel2_af_drag) +
@@ -345,9 +345,9 @@ void DustGasDrag::RK2ExplicitFeedback(const int stage,
 
             if (Drag_WorkDissipation) {
               inv_dust_dens     = 1.0/dust_dens;
-              dust_vel1_bf_drag = dust_mom1*inv_dust_dens;
-              dust_vel2_bf_drag = dust_mom2*inv_dust_dens;
-              dust_vel3_bf_drag = dust_mom3*inv_dust_dens;
+              dust_vel1_bf_drag = (dust_mom1 - DustDiffusionMom(v1_id, k, j, i))*inv_dust_dens;
+              dust_vel2_bf_drag = (dust_mom2 - DustDiffusionMom(v2_id, k, j, i))*inv_dust_dens;
+              dust_vel3_bf_drag = (dust_mom3 - DustDiffusionMom(v3_id, k, j, i))*inv_dust_dens;
 
               Stage_I_vel1(n, k, j, i) = dust_vel1_bf_drag;
               Stage_I_vel2(n, k, j, i) = dust_vel2_bf_drag;
@@ -367,9 +367,9 @@ void DustGasDrag::RK2ExplicitFeedback(const int stage,
             // dE_gas = dM_dust*(v_dust_before + v_dust_after)/2
             if (Drag_WorkDissipation) {
               // Calculate the dust velocity after drags
-              Real dust_vel1_af_drag = dust_mom1*inv_dust_dens;
-              Real dust_vel2_af_drag = dust_mom2*inv_dust_dens;
-              Real dust_vel3_af_drag = dust_mom3*inv_dust_dens;
+              Real dust_vel1_af_drag = (dust_mom1 - DustDiffusionMom(v1_id, k, j, i))*inv_dust_dens;
+              Real dust_vel2_af_drag = (dust_mom2 - DustDiffusionMom(v2_id, k, j, i))*inv_dust_dens;
+              Real dust_vel3_af_drag = (dust_mom3 - DustDiffusionMom(v3_id, k, j, i))*inv_dust_dens;
 
               Real dissipation = 0.5*(delta_mom1(n, i)*(dust_vel1_bf_drag + dust_vel1_af_drag) +
                                       delta_mom2(n, i)*(dust_vel2_bf_drag + dust_vel2_af_drag) +
@@ -506,9 +506,9 @@ void DustGasDrag::RK2ExplicitFeedback(const int stage,
             if (Drag_WorkDissipation) {
               // Calculate the dust velocity after drags
               Real inv_dust_dens     = 1.0/dust_dens;
-              Real dust_vel1_af_drag = dust_mom1*inv_dust_dens;
-              Real dust_vel2_af_drag = dust_mom2*inv_dust_dens;
-              Real dust_vel3_af_drag = dust_mom3*inv_dust_dens;
+              Real dust_vel1_af_drag = (dust_mom1 - DustDiffusionMom(v1_id, k, j, i))*inv_dust_dens;
+              Real dust_vel2_af_drag = (dust_mom2 - DustDiffusionMom(v2_id, k, j, i))*inv_dust_dens;
+              Real dust_vel3_af_drag = (dust_mom3 - DustDiffusionMom(v3_id, k, j, i))*inv_dust_dens;
 
               Real dissipation_I = -0.5*(Stage_I_delta_mom1(n, k, j, i)*(Stage_I_vel1(n, k, j, i) + dust_vel1) +
                                          Stage_I_delta_mom2(n, k, j, i)*(Stage_I_vel2(n, k, j, i) + dust_vel2) +

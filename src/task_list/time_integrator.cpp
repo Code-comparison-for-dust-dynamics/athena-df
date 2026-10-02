@@ -1001,11 +1001,14 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
 
     if ((Globals::local_ndustfluids_inte > 0) && (NSCALARS > 0)) {
       AddTask(SRCTERM_DFS,INT_DFS);
-      AddTask(SRC_TERM,(INT_HYD|INT_SCLR|INT_CHM));
+      // A user hydro source may also update dust conserved variables.  Run it only
+      // after the dust update/source task so df_u and its pre-drag backup have a
+      // deterministic ordering independent of boundary-message arrival timing.
+      AddTask(SRC_TERM,(INT_HYD|INT_SCLR|INT_CHM|SRCTERM_DFS));
       AddTask(DRAG_DFS,(SRC_TERM|SRCTERM_DFS));
     } else if (Globals::local_ndustfluids_inte > 0) {
       AddTask(SRCTERM_DFS,INT_DFS);
-      AddTask(SRC_TERM,INT_HYD);
+      AddTask(SRC_TERM,(INT_HYD|SRCTERM_DFS));
       AddTask(DRAG_DFS,(SRC_TERM|SRCTERM_DFS));
     } else if (NSCALARS > 0) {
       AddTask(SRC_TERM,(INT_HYD|INT_SCLR|INT_CHM));
@@ -2091,6 +2094,11 @@ TaskStatus TimeIntegratorTaskList::AddSourceTerms(MeshBlock *pmb, int stage) {
       ph->hsrc.AddSourceTerms(t_start_stage, dt, ph->flux, ph->w, pdf->df_w, ps->r,
                                   pf->bcc, ph->u, pdf->df_u, ps->s);
       pmb->DeepCopy(ph->u_af_src, ph->u);
+      if (Globals::local_ndustfluids_inte > 0) {
+        // User source functions are allowed to modify df_u through the hydro-source
+        // callback, so this is the complete dust state that the drag solver must use.
+        pmb->DeepCopy(pdf->df_u_af_src, pdf->df_u);
+      }
     }
     return TaskStatus::next;
   }

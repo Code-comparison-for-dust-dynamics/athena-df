@@ -158,4 +158,22 @@ class DustFluids {
   AthenaArray<Real> laplacian_l_df_fc_, laplacian_r_df_fc_;
   void AddDiffusionFluxes();        // Add the diffusive flux on the dust flux
 };
+
+//! With momentum diffusion the conserved dust momentum is rho_d (v_d + v_dif) (Huang & Bai 2022),
+//! while the drag acts on rho_d v_d only. The diffusion momentum to remove is the one that the next
+//! conservative-to-primitive conversion will remove: diff_mom_cc of this stage, including any change a
+//! source term made to it (e.g. the accretion sink scaling it with the dust). Zero without it, so
+//! that U - DustDiffusionMom() is then U exactly.
+inline Real DustGasDrag::DustDiffusionMom(const int v_id, const int k, const int j,
+                                          const int i) const {
+  const DustFluids *pdf = pmy_dustfluids_;
+  return pdf->dfdif.MomentumIncludesDiffusion() ? pdf->dfccdif.diff_mom_cc(v_id, k, j, i) : 0.0;
+}
+
+//! The implicit drag solvers take this minus rho_d v_d(ref) as the explicit increment of the dust
+//! momentum (Huang & Bai 2022, Eq. 30).
+inline Real DustGasDrag::DustFluidMomAfterSrc(const int v_id, const int k, const int j,
+                                              const int i) const {
+  return pmy_dustfluids_->df_u_af_src(v_id, k, j, i) - DustDiffusionMom(v_id, k, j, i);
+}
 #endif // DUSTFLUIDS_HPP_

@@ -182,6 +182,13 @@ class DustGasDrag {
   Hydro       *pmy_hydro_;        // ptr to hydro class
   int         orb_advection_;     // Orbital Advection
 
+  // Diffusion momentum rho_d v_dif held in the conserved dust momentum (zero without momentum
+  // diffusion), and the dust fluid momentum rho_d v_d after the explicit source terms, the input of
+  // the implicit drag solvers. Defined in dustfluids.hpp, where DustFluids is complete. Dust
+  // velocities in the drag work and dissipation are (u_df - DustDiffusionMom)/rho_d.
+  inline Real DustDiffusionMom(const int v_id, const int k, const int j, const int i) const;
+  inline Real DustFluidMomAfterSrc(const int v_id, const int k, const int j, const int i) const;
+
   AthenaArray<Real> force_x1, force_x2, force_x3;
   AthenaArray<Real> force_x1_n, force_x2_n, force_x3_n;
 

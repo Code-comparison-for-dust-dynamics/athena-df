@@ -37,8 +37,7 @@ void EquationOfState::DustFluidsConservedToPrimitive(
   MeshBlock  *pmb = pmy_block_;
   DustFluids *pdf = pmb->pdustfluids;
 
-  bool diffusion_correction = ((pdf->dfdif.dustfluids_diffusion_defined) &&
-                               (pdf->dfdif.Momentum_Diffusion_Flag));
+  bool diffusion_correction = pdf->dfdif.MomentumIncludesDiffusion();
 
   //bool diffusion_correction = false;
 
@@ -205,8 +204,7 @@ void EquationOfState::DustFluidsPrimitiveToConserved(
   MeshBlock  *pmb = pmy_block_;
   DustFluids *pdf = pmb->pdustfluids;
 
-  bool diffusion_correction = ((pdf->dfdif.dustfluids_diffusion_defined) &&
-                               (pdf->dfdif.Momentum_Diffusion_Flag));
+  bool diffusion_correction = pdf->dfdif.MomentumIncludesDiffusion();
 
   if (diffusion_correction) {
     for (int n=0; n<NDUSTFLUIDS; ++n) {

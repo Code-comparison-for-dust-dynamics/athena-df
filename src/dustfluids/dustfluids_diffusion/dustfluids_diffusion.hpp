@@ -36,6 +36,12 @@ class DustFluidsDiffusion {
   //bool ConstNu_Flag;                 // true or false, the flag of using the constant diffusivity of dust
   bool Momentum_Diffusion_Flag;      // true or false, the flag of momentum diffusion of dust fluids
 
+  // True when the conserved dust momentum is rho_d (v_d + v_dif), i.e. it holds the diffusion
+  // momentum diff_mom_cc, which must be removed wherever rho_d v_d is needed.
+  bool MomentumIncludesDiffusion() const {
+    return dustfluids_diffusion_defined && Momentum_Diffusion_Flag;
+  }
+
   // The flux tensor of dust fluids caused by diffusions
   AthenaArray<Real> dustfluids_diffusion_flux[3];
 

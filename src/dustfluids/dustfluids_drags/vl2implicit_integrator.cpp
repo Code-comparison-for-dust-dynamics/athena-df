@@ -40,7 +40,6 @@ void DustGasDrag::VL2ImplicitFeedback(const int stage,
   const AthenaArray<Real> &w_df_n          = pmy_dustfluids_->df_w_n;
   const AthenaArray<Real> &stopping_time_n = pmy_dustfluids_->stopping_time_array_n;
   const AthenaArray<Real> &u_af_src        = pmy_hydro_->u_af_src;
-  const AthenaArray<Real> &u_df_af_src     = pmy_dustfluids_->df_u_af_src;
 
   if (Stage_I) {
     for (int k=ks; k<=ke; ++k) {
@@ -97,9 +96,9 @@ void DustGasDrag::VL2ImplicitFeedback(const int stage,
             Real &dust_mom2_bf_src = mom2_prim(n, i);
             Real &dust_mom3_bf_src = mom3_prim(n, i);
 
-            delta_mom1_src(n, i) = (u_df_af_src(v1_id, k, j, i) - dust_mom1_bf_src);
-            delta_mom2_src(n, i) = (u_df_af_src(v2_id, k, j, i) - dust_mom2_bf_src);
-            delta_mom3_src(n, i) = (u_df_af_src(v3_id, k, j, i) - dust_mom3_bf_src);
+            delta_mom1_src(n, i) = (DustFluidMomAfterSrc(v1_id, k, j, i) - dust_mom1_bf_src);
+            delta_mom2_src(n, i) = (DustFluidMomAfterSrc(v2_id, k, j, i) - dust_mom2_bf_src);
+            delta_mom3_src(n, i) = (DustFluidMomAfterSrc(v3_id, k, j, i) - dust_mom3_bf_src);
 
             alpha(n,  i)      = 1.0/(stopping_time(dust_id, k, j, i) + TINY_NUMBER);
             qvalue(n, i)      = alpha(n, i)*dt;
@@ -198,9 +197,9 @@ void DustGasDrag::VL2ImplicitFeedback(const int stage,
 
             if (Drag_WorkDissipation) {
               inv_dust_dens     = 1.0/dust_dens;
-              dust_vel1_bf_drag = dust_mom1*inv_dust_dens;
-              dust_vel2_bf_drag = dust_mom2*inv_dust_dens;
-              dust_vel3_bf_drag = dust_mom3*inv_dust_dens;
+              dust_vel1_bf_drag = (dust_mom1 - DustDiffusionMom(v1_id, k, j, i))*inv_dust_dens;
+              dust_vel2_bf_drag = (dust_mom2 - DustDiffusionMom(v2_id, k, j, i))*inv_dust_dens;
+              dust_vel3_bf_drag = (dust_mom3 - DustDiffusionMom(v3_id, k, j, i))*inv_dust_dens;
             }
 
             delta_mom1(n, i) = weight_dust(n, i)*(mom1_prim(n, i) + delta_mom1_src(n, i) + qvalue(n, i)*dust_rho*temp_total_vel1(i)) - mom1_prim(n, i);
@@ -220,9 +219,9 @@ void DustGasDrag::VL2ImplicitFeedback(const int stage,
             // dE_gas = dM_dust*(v_dust_before + v_dust_after)/2
             if (Drag_WorkDissipation) {
               // Calculate the dust velocity after drags
-              Real dust_vel1_af_drag = dust_mom1*inv_dust_dens;
-              Real dust_vel2_af_drag = dust_mom2*inv_dust_dens;
-              Real dust_vel3_af_drag = dust_mom3*inv_dust_dens;
+              Real dust_vel1_af_drag = (dust_mom1 - DustDiffusionMom(v1_id, k, j, i))*inv_dust_dens;
+              Real dust_vel2_af_drag = (dust_mom2 - DustDiffusionMom(v2_id, k, j, i))*inv_dust_dens;
+              Real dust_vel3_af_drag = (dust_mom3 - DustDiffusionMom(v3_id, k, j, i))*inv_dust_dens;
 
               Real dissipation = 0.5*(dust_delta_mom1_drag*(dust_vel1_bf_drag + dust_vel1_af_drag) +
                                       dust_delta_mom2_drag*(dust_vel2_bf_drag + dust_vel2_af_drag) +
@@ -316,9 +315,9 @@ void DustGasDrag::VL2ImplicitFeedback(const int stage,
             force_x2_n(0, i) -= force_x2_n(idx, i);
             force_x3_n(0, i) -= force_x3_n(idx, i);
 
-            delta_mom1_src(idx, i) = (u_df_af_src(v1_id, k, j, i) - dust_mom1_bf_src);
-            delta_mom2_src(idx, i) = (u_df_af_src(v2_id, k, j, i) - dust_mom2_bf_src);
-            delta_mom3_src(idx, i) = (u_df_af_src(v3_id, k, j, i) - dust_mom3_bf_src);
+            delta_mom1_src(idx, i) = (DustFluidMomAfterSrc(v1_id, k, j, i) - dust_mom1_bf_src);
+            delta_mom2_src(idx, i) = (DustFluidMomAfterSrc(v2_id, k, j, i) - dust_mom2_bf_src);
+            delta_mom3_src(idx, i) = (DustFluidMomAfterSrc(v3_id, k, j, i) - dust_mom3_bf_src);
 
             Real dust_delta_force_x1_src = delta_mom1_src(idx, i)*inv_dt;
             Real dust_delta_force_x2_src = delta_mom2_src(idx, i)*inv_dt;
@@ -540,9 +539,9 @@ void DustGasDrag::VL2ImplicitFeedback(const int stage,
 
             if (Drag_WorkDissipation) {
               inv_dust_dens     = 1.0/dust_dens;
-              dust_vel1_bf_drag = dust_mom1*inv_dust_dens;
-              dust_vel2_bf_drag = dust_mom2*inv_dust_dens;
-              dust_vel3_bf_drag = dust_mom3*inv_dust_dens;
+              dust_vel1_bf_drag = (dust_mom1 - DustDiffusionMom(v1_id, k, j, i))*inv_dust_dens;
+              dust_vel2_bf_drag = (dust_mom2 - DustDiffusionMom(v2_id, k, j, i))*inv_dust_dens;
+              dust_vel3_bf_drag = (dust_mom3 - DustDiffusionMom(v3_id, k, j, i))*inv_dust_dens;
             }
 
             // Add the delta momentum caused by drags on dust conserves
@@ -558,9 +557,9 @@ void DustGasDrag::VL2ImplicitFeedback(const int stage,
             // dE_gas = dM_dust*(v_dust_before + v_dust_after)/2
             if (Drag_WorkDissipation) {
               // Calculate the dust velocity after drags
-              Real dust_vel1_af_drag = dust_mom1*inv_dust_dens;
-              Real dust_vel2_af_drag = dust_mom2*inv_dust_dens;
-              Real dust_vel3_af_drag = dust_mom3*inv_dust_dens;
+              Real dust_vel1_af_drag = (dust_mom1 - DustDiffusionMom(v1_id, k, j, i))*inv_dust_dens;
+              Real dust_vel2_af_drag = (dust_mom2 - DustDiffusionMom(v2_id, k, j, i))*inv_dust_dens;
+              Real dust_vel3_af_drag = (dust_mom3 - DustDiffusionMom(v3_id, k, j, i))*inv_dust_dens;
 
               Real dissipation = 0.5*(dust_delta_mom1_drag*(dust_vel1_bf_drag + dust_vel1_af_drag) +
                                       dust_delta_mom2_drag*(dust_vel2_bf_drag + dust_vel2_af_drag) +
@@ -592,7 +591,6 @@ void DustGasDrag::VL2ImplicitNoFeedback(const int stage,
   const AthenaArray<Real> &w_n             = pmy_hydro_->w_n;
   const AthenaArray<Real> &w_df_n          = pmy_dustfluids_->df_w_n;
   const AthenaArray<Real> &stopping_time_n = pmy_dustfluids_->stopping_time_array_n;
-  const AthenaArray<Real> &u_df_af_src     = pmy_dustfluids_->df_u_af_src;
 
   if (Stage_I) {
     for (int k=ks; k<=ke; ++k) {
@@ -636,9 +634,9 @@ void DustGasDrag::VL2ImplicitNoFeedback(const int stage,
             Real &dust_mom2_bf_src = mom2_prim(n, i);
             Real &dust_mom3_bf_src = mom3_prim(n, i);
 
-            delta_mom1_src(n, i) = (u_df_af_src(v1_id, k, j, i) - dust_mom1_bf_src);
-            delta_mom2_src(n, i) = (u_df_af_src(v2_id, k, j, i) - dust_mom2_bf_src);
-            delta_mom3_src(n, i) = (u_df_af_src(v3_id, k, j, i) - dust_mom3_bf_src);
+            delta_mom1_src(n, i) = (DustFluidMomAfterSrc(v1_id, k, j, i) - dust_mom1_bf_src);
+            delta_mom2_src(n, i) = (DustFluidMomAfterSrc(v2_id, k, j, i) - dust_mom2_bf_src);
+            delta_mom3_src(n, i) = (DustFluidMomAfterSrc(v3_id, k, j, i) - dust_mom3_bf_src);
 
             alpha(n, i)       = 1.0/(stopping_time(dust_id, k, j, i) + TINY_NUMBER);
             qvalue(n, i)      = alpha(n, i)*dt;
@@ -743,9 +741,9 @@ void DustGasDrag::VL2ImplicitNoFeedback(const int stage,
             force_x2_n(idx, i) = alpha(idx, i)*(epsilon(idx, i)*mom2_prim_n(0, i) - dust_mom2_bf_src);
             force_x3_n(idx, i) = alpha(idx, i)*(epsilon(idx, i)*mom3_prim_n(0, i) - dust_mom3_bf_src);
 
-            delta_mom1_src(idx, i) = (u_df_af_src(v1_id, k, j, i) - dust_mom1_bf_src);
-            delta_mom2_src(idx, i) = (u_df_af_src(v2_id, k, j, i) - dust_mom2_bf_src);
-            delta_mom3_src(idx, i) = (u_df_af_src(v3_id, k, j, i) - dust_mom3_bf_src);
+            delta_mom1_src(idx, i) = (DustFluidMomAfterSrc(v1_id, k, j, i) - dust_mom1_bf_src);
+            delta_mom2_src(idx, i) = (DustFluidMomAfterSrc(v2_id, k, j, i) - dust_mom2_bf_src);
+            delta_mom3_src(idx, i) = (DustFluidMomAfterSrc(v3_id, k, j, i) - dust_mom3_bf_src);
 
             Real dust_delta_force_x1_src = delta_mom1_src(idx, i)*inv_dt;
             Real dust_delta_force_x2_src = delta_mom2_src(idx, i)*inv_dt;
