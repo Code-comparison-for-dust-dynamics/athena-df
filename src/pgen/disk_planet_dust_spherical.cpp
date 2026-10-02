@@ -1588,7 +1588,7 @@ void UpperWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
           Real gas_vel3_0 = vel_gas_phi;
           Real gas_pre_0  = cs_square_0*gas_rho_0;
 
-          Real damping_factor = R_func(i)*inv_damping_tau(i)*dt;
+          Real damping_factor = Theta_func(i)*inv_damping_tau(i)*dt;
           DampGasConservedCell(cons, k, j, i, gas_rho_0, gas_vel1_0,
                                gas_vel2_0, gas_vel3_0, gas_pre_0,
                                damping_factor, gm1, density_floor, pressure_floor,
@@ -1657,7 +1657,7 @@ void LowerWaveDampingGas(MeshBlock *pmb, const Real dt, int il, int iu,
           Real gas_vel3_0 = vel_gas_phi;
           Real gas_pre_0  = cs_square_0*gas_rho_0;
 
-          Real damping_factor = R_func(i)*inv_damping_tau(i)*dt;
+          Real damping_factor = Theta_func(i)*inv_damping_tau(i)*dt;
           DampGasConservedCell(cons, k, j, i, gas_rho_0, gas_vel1_0,
                                gas_vel2_0, gas_vel3_0, gas_pre_0,
                                damping_factor, gm1, density_floor, pressure_floor,

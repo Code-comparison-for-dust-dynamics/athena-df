@@ -168,6 +168,7 @@ class EquationOfState {
   Real GetIsoSoundSpeed() const {return iso_sound_speed_;}
   Real GetDensityFloor() const {return density_floor_;}
   Real GetPressureFloor() const {return pressure_floor_;}
+  Real GetDustFluidsFloor(const int n) const {return dustfluids_floor_[n];}
   Real GetScalarFloor() const {return scalar_floor_;}
   EosTable* ptable; // pointer to EOS table data
 #if GENERAL_EOS
