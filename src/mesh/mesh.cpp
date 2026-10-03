@@ -1977,9 +1977,12 @@ void Mesh::Initialize(int res_flag, ParameterInput *pin) {
   // diffusivities, ...), so that the first cycle already obeys the new limits. A kept dt
   // more than twice the recomputed one stops the run: the factor marks an evident mismatch,
   // not a stability bound, and the run is not silently switched to another trajectory.
-  // With STS the number of super-time-steps still follows the recomputed dt_parabolic.
+  // With STS the number of STS substeps still follows the recomputed dt_parabolic, so bitwise
+  // restarts are not guaranteed with STS. The parameter is registered in every run, so that
+  // restart files carry it and a restart can change it on the command line.
+  const bool restart_keep_dt = pin->GetOrAddBoolean("time", "restart_keep_dt", true);
   if ((res_flag == 1) && (fluid_setup != FluidFormulation::fixed) && (dt_restart > 0.0)
-      && pin->GetOrAddBoolean("time", "restart_keep_dt", true)) {
+      && restart_keep_dt) {
     const Real dt_recomputed = dt;
     dt = dt_restart;
     if (time < tlim && (tlim - time) < dt) dt = tlim - time;
@@ -1988,8 +1991,9 @@ void Mesh::Initialize(int res_flag, ParameterInput *pin) {
       msg << "### FATAL ERROR in function [Mesh::Initialize]" << std::endl
           << "The restart file's dt = " << dt << " is more than twice the dt recomputed "
           << "from the restarted state, " << dt_recomputed << "." << std::endl
-          << "Restart with time/restart_keep_dt=false to start from the recomputed dt "
-          << "(the continuation is then not bitwise identical to an uninterrupted run)."
+          << "Set time/restart_keep_dt=false (on the command line, or in an input file given "
+          << "with -i) to start from the recomputed dt (the continuation is then not bitwise "
+          << "identical to an uninterrupted run)."
           << std::endl;
       ATHENA_ERROR(msg);
     }
