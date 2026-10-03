@@ -1699,10 +1699,6 @@ void InnerWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
       Real x2 = pmb->pcoord->x2v(j);
       for (int n=0; n<NDUSTFLUIDS; ++n) {
         int dust_id = n;
-        int rho_id  = 4*dust_id;
-        int v1_id   = rho_id + 1;
-        int v2_id   = rho_id + 2;
-        int v3_id   = rho_id + 3;
 #pragma omp simd
         for (int i=il; i<=iu; ++i) {
           Real x1 = pmb->pcoord->x1v(i);
@@ -1716,12 +1712,9 @@ void InnerWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
 
             Real cs_square_0 = PoverRho(rad_arr(i), phi_arr(i), z_arr(i));
             Real eta_gas     = 0.5*(qvalue + pvalue)*cs_square_0/SQR(rad_arr(i)*omega_dyn(i));
-            //Real vel_K_sph   = std::sqrt(gm0/x1);
-            Real vel_K_sph   = rad_arr(i)*omega_dyn(i);
-
             Real vel_K           = vK(pmb->porb, x1, x2, x3);
             Real vel_dust_cyl    = VelProfileCyl_NSH_rad_dust(rad_arr(i), phi_arr(i), z_arr(i), initial_D2G[dust_id], Stokes_number[dust_id], eta_gas);
-            Real vel_dust_phi    = vel_K_sph + VelProfileCyl_NSH_phi_dust(rad_arr(i), phi_arr(i), z_arr(i), initial_D2G[dust_id], Stokes_number[dust_id], eta_gas);
+            Real vel_dust_phi    = vel_K + VelProfileCyl_NSH_phi_dust(rad_arr(i), phi_arr(i), z_arr(i), initial_D2G[dust_id], Stokes_number[dust_id], eta_gas);
             vel_dust_phi        -= orb_defined*vel_K;
             Real vel_dust_r      = vel_dust_cyl*std::sin(x2);
             Real vel_dust_theta  = vel_dust_cyl*std::cos(x2);
@@ -1773,10 +1766,6 @@ void OuterWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
       Real x2 = pmb->pcoord->x2v(j);
       for (int n=0; n<NDUSTFLUIDS; ++n) {
         int dust_id = n;
-        int rho_id  = 4*dust_id;
-        int v1_id   = rho_id + 1;
-        int v2_id   = rho_id + 2;
-        int v3_id   = rho_id + 3;
 #pragma omp simd
         for (int i=il; i<=iu; ++i) {
           Real x1 = pmb->pcoord->x1v(i);
@@ -1790,12 +1779,9 @@ void OuterWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
 
             Real cs_square_0 = PoverRho(rad_arr(i), phi_arr(i), z_arr(i));
             Real eta_gas     = 0.5*(qvalue + pvalue)*cs_square_0/SQR(rad_arr(i)*omega_dyn(i));
-            //Real vel_K_sph   = std::sqrt(gm0/x1);
-            Real vel_K_sph   = rad_arr(i)*omega_dyn(i);
-
             Real vel_K           = vK(pmb->porb, x1, x2, x3);
             Real vel_dust_cyl    = VelProfileCyl_NSH_rad_dust(rad_arr(i), phi_arr(i), z_arr(i), initial_D2G[dust_id], Stokes_number[dust_id], eta_gas);
-            Real vel_dust_phi    = vel_K_sph + VelProfileCyl_NSH_phi_dust(rad_arr(i), phi_arr(i), z_arr(i), initial_D2G[dust_id], Stokes_number[dust_id], eta_gas);
+            Real vel_dust_phi    = vel_K + VelProfileCyl_NSH_phi_dust(rad_arr(i), phi_arr(i), z_arr(i), initial_D2G[dust_id], Stokes_number[dust_id], eta_gas);
             vel_dust_phi        -= orb_defined*vel_K;
             Real vel_dust_r      = vel_dust_cyl*std::sin(x2);
             Real vel_dust_theta  = vel_dust_cyl*std::cos(x2);
@@ -1822,8 +1808,9 @@ void OuterWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
 // fill ghosts/primitives exactly as restart initialization does. No diffusive
 // momentum is retained while dust follows the gas before release.
 void PinDustBeforeRelease(MeshBlock *pmb) {
-  if ((NDUSTFLUIDS <= 0) || (time_drag <= 0.0) || (pmb->pmy_mesh->time >= time_drag))
-    return;
+  if (NDUSTFLUIDS <= 0) return;
+  const Real t_release = pmb->pdustfluids->dfdrag.time_drag;
+  if ((t_release <= 0.0) || (pmb->pmy_mesh->time >= t_release)) return;
   const AthenaArray<Real> &u = pmb->phydro->u;
   AthenaArray<Real> &cons_df = pmb->pdustfluids->df_u;
   for (int n=0; n<NDUSTFLUIDS; ++n) {
@@ -1902,7 +1889,7 @@ void DustDensityPercentFloor(MeshBlock *pmb, int il, int iu, int jl, int ju,
         int v2_id   = rho_id + 2;
         int v3_id   = rho_id + 3;
 #pragma omp simd
-        for (int i=jl; i<=iu; ++i) {
+        for (int i=il; i<=iu; ++i) {
           Real &dust_rho  = prim_df(rho_id, k, j, i);
           Real &dust_vel1 = prim_df(v1_id,  k, j, i);
           Real &dust_vel2 = prim_df(v2_id,  k, j, i);
@@ -1934,8 +1921,6 @@ void DustDensityPercentFloor(MeshBlock *pmb, int il, int iu, int jl, int ju,
 
 void MeshBlock::UserWorkInLoop() {
 
-  Real &time = pmy_mesh->time;
-  Real &dt   = pmy_mesh->dt;
   Real mygam = peos->GetGamma();
   Real igm1  = 1.0/(mygam - 1.0);
   int dk     = NGHOST;
@@ -1950,6 +1935,10 @@ void MeshBlock::UserWorkInLoop() {
 
   // Wave damping is done in PostUpdate, on active cells before the boundary exchange.
 
+  // These optional legacy corrections still run after ghost filling. Their
+  // restart reproducibility when they alter cells is outside the release fix.
+  // If enabling either correction below, rerun bitwise restart tests with it
+  // actually modifying cells, including checkpoints around dust release.
   if (Isothermal_Flag)
     LocalIsothermalEOS(this, il, iu, jl, ju, kl, ku, phydro->w, phydro->u);
   
