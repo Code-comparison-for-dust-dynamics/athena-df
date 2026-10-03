@@ -56,6 +56,11 @@ OrbitalAdvection::OrbitalAdvection(MeshBlock *pmb, ParameterInput *pin)
   if (NDUSTFLUIDS > 0)
     dust_xorder = pmb->pdustfluids->dust_xorder;
 
+  nvar_df_orb = NDUSTVARS;
+  if ((NDUSTFLUIDS > 0) && pmb->pdustfluids->dfdif.MomentumIncludesDiffusion())
+    nvar_df_orb = 2*NDUSTVARS;
+  orb_df_src_ = nullptr;
+
   // Read parameters
   if (std::strcmp(COORDINATE_SYSTEM, "cartesian") == 0) {
     Omega0  = pin->GetOrAddReal("orbital_advection","Omega0",0.0);
@@ -299,7 +304,7 @@ OrbitalAdvection::OrbitalAdvection(MeshBlock *pmb, ParameterInput *pin)
           }
         }
         if (NDUSTFLUIDS>0) {
-          orbital_df_u.NewAthenaArray(NDUSTVARS, nc3, nc1, nc2+onx+1);
+          orbital_df_u.NewAthenaArray(nvar_df_orb, nc3, nc1, nc2+onx+1);
         }
         if (NSCALARS>0) {
           orbital_scalar.NewAthenaArray(NSCALARS, nc3, nc1, nc2+onx+1);
@@ -334,7 +339,7 @@ OrbitalAdvection::OrbitalAdvection(MeshBlock *pmb, ParameterInput *pin)
           }
         }
         if (NDUSTFLUIDS>0) {
-          orbital_df_u.NewAthenaArray(NDUSTVARS, nc2, nc1, nc3+onx+1);
+          orbital_df_u.NewAthenaArray(nvar_df_orb, nc2, nc1, nc3+onx+1);
         }
         if (NSCALARS>0) {
           orbital_scalar.NewAthenaArray(NSCALARS, nc2, nc1, nc3+onx+1);
@@ -347,6 +352,8 @@ OrbitalAdvection::OrbitalAdvection(MeshBlock *pmb, ParameterInput *pin)
     if (NDUSTFLUIDS > 0) {
       df_w_orb.NewAthenaArray(NDUSTVARS, nc3, nc2, nc1);
       df_u_orb.NewAthenaArray(NDUSTVARS, nc3, nc2, nc1);
+      if (orbital_advection_active && (nvar_df_orb > NDUSTVARS))
+        df_uj_.NewAthenaArray(nvar_df_orb, nc3, nc2, nc1);
     }
 
     if (orbital_advection_active) {
@@ -358,11 +365,11 @@ OrbitalAdvection::OrbitalAdvection(MeshBlock *pmb, ParameterInput *pin)
                                      (nc2+2*NGHOST)/2, (nc1+2*NGHOST)/2);
         u_temp.NewAthenaArray(NHYDRO, nc3, nc2, nc1);
         if (NDUSTFLUIDS>0) {
-          df_u_coarse_send.NewAthenaArray(NDUSTVARS, (nc3+2*NGHOST)/2,
+          df_u_coarse_send.NewAthenaArray(nvar_df_orb, (nc3+2*NGHOST)/2,
                                        (nc2+2*NGHOST)/2, (nc1+2*NGHOST)/2);
-          df_u_coarse_recv.NewAthenaArray(NDUSTVARS, (nc3+2*NGHOST)/2,
+          df_u_coarse_recv.NewAthenaArray(nvar_df_orb, (nc3+2*NGHOST)/2,
                                        (nc2+2*NGHOST)/2, (nc1+2*NGHOST)/2);
-          df_u_temp.NewAthenaArray(NDUSTVARS, nc3, nc2, nc1);
+          df_u_temp.NewAthenaArray(nvar_df_orb, nc3, nc2, nc1);
         }
         if (NSCALARS>0) {
           s_coarse_send.NewAthenaArray(NSCALARS, (nc3+2*NGHOST)/2,

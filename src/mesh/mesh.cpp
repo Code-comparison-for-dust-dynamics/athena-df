@@ -1565,6 +1565,7 @@ void Mesh::ApplyUserWorkBeforeOutput(ParameterInput *pin) {
 //! \brief  initialization before the main loop
 
 void Mesh::Initialize(int res_flag, ParameterInput *pin) {
+  const Real dt_restart = dt;  // on restart: the dt read from the restart file
   bool iflag = true;
   int inb = nbtotal;
   int nthreads = GetNumMeshThreads();
@@ -1967,6 +1968,39 @@ void Mesh::Initialize(int res_flag, ParameterInput *pin) {
   }
 
   NewTimeStep();
+  // By default a restart continues with the dt the uninterrupted run computed at the end of
+  // its last cycle, so that an unchanged continuation reproduces that run bitwise. The value
+  // recomputed above is not the same in general: the viscosity, dust diffusivity and dust
+  // sound speed are evaluated here from the final state, whereas the end-of-cycle timestep
+  // used the coefficients set at the start of the last stage. Set <time>/restart_keep_dt =
+  // false when restarting with changed timestep-related parameters (cfl_number, viscosity,
+  // diffusivities, ...), so that the first cycle already obeys the new limits. A kept dt
+  // more than twice the recomputed one stops the run: the factor marks an evident mismatch,
+  // not a stability bound, and the run is not silently switched to another trajectory.
+  // With STS the number of super-time-steps still follows the recomputed dt_parabolic.
+  if ((res_flag == 1) && (fluid_setup != FluidFormulation::fixed) && (dt_restart > 0.0)
+      && pin->GetOrAddBoolean("time", "restart_keep_dt", true)) {
+    const Real dt_recomputed = dt;
+    dt = dt_restart;
+    if (time < tlim && (tlim - time) < dt) dt = tlim - time;
+    if (dt > 2.0*dt_recomputed) {
+      std::stringstream msg;
+      msg << "### FATAL ERROR in function [Mesh::Initialize]" << std::endl
+          << "The restart file's dt = " << dt << " is more than twice the dt recomputed "
+          << "from the restarted state, " << dt_recomputed << "." << std::endl
+          << "Restart with time/restart_keep_dt=false to start from the recomputed dt "
+          << "(the continuation is then not bitwise identical to an uninterrupted run)."
+          << std::endl;
+      ATHENA_ERROR(msg);
+    }
+    if ((dt > 1.1*dt_recomputed) && (Globals::my_rank == 0)) {
+      std::cout << "### Warning in Mesh::Initialize" << std::endl
+                << "The restart file's dt = " << dt << " exceeds the dt recomputed from the "
+                << "restarted state, " << dt_recomputed << ", by more than 10%." << std::endl
+                << "If timestep-related parameters were changed, restart with "
+                << "time/restart_keep_dt=false." << std::endl;
+    }
+  }
   return;
 }
 

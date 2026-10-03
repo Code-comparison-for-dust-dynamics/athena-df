@@ -402,14 +402,14 @@ int main(int argc, char *argv[]) {
 #ifdef MPI_PARALLEL
     MPI_Finalize();
 #endif
-    return(0);
+    return(EXIT_FAILURE);
   }
   catch(std::exception const& ex) {
     std::cout << ex.what() << std::endl;  // prints diagnostic message
 #ifdef MPI_PARALLEL
     MPI_Finalize();
 #endif
-    return(0);
+    return(EXIT_FAILURE);
   }
 #endif // ENABLE_EXCEPTIONS
 

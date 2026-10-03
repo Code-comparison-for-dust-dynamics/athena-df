@@ -40,6 +40,20 @@ void OrbitalAdvection::SetOrbitalAdvectionCC(const AthenaArray<Real> &u,
   int js = pmb_->js, je = pmb_->je;
   int ks = pmb_->ks, ke = pmb_->ke;
 
+  // dust variables to be remapped (see nvar_df_orb), including ghosts for the communication
+  if (NDUSTFLUIDS > 0) {
+    if (nvar_df_orb > NDUSTVARS) {
+      const AthenaArray<Real> &diff_mom = pdf_->dfccdif.diff_mom_cc;
+      const std::size_t nbytes = u_df.GetSizeInBytes();
+      std::memcpy(df_uj_.data(), u_df.data(), nbytes);
+      std::memcpy(df_uj_.data() + u_df.GetSize(), diff_mom.data(), nbytes);
+      orb_df_src_ = &df_uj_;
+    } else {
+      orb_df_src_ = &u_df;
+    }
+  }
+  const AthenaArray<Real> &df_src = (NDUSTFLUIDS > 0) ? *orb_df_src_ : u_df;
+
   // set variables of this meshblock into orbital blocks
   if (orbital_direction ==1) { // cartesian or cylindrical
     // hydro variables
@@ -65,10 +79,10 @@ void OrbitalAdvection::SetOrbitalAdvectionCC(const AthenaArray<Real> &u,
           const int shift = (offset>0)?onx:0;
           int jl = std::max(js, js-xgh-offset);
           int ju = std::min(je, je+1+xgh-offset);
-          for (int ndv = 0; ndv < NDUSTVARS; ndv++) {
+          for (int ndv = 0; ndv < nvar_df_orb; ndv++) {
 #pragma omp simd
             for (int j = jl; j <= ju; j++) {
-              orbital_df_u(ndv,k,i,j+shift)= u_df(ndv,k,j,i);
+              orbital_df_u(ndv,k,i,j+shift)= df_src(ndv,k,j,i);
             }
           }
         }
@@ -115,10 +129,10 @@ void OrbitalAdvection::SetOrbitalAdvectionCC(const AthenaArray<Real> &u,
           const int shift = (offset>0)?onx:0;
           int kl = std::max(ks, ks-xgh-offset);
           int ku = std::min(ke, ke+1+xgh-offset);
-          for (int ndv = 0; ndv < NDUSTVARS; ndv++) {
+          for (int ndv = 0; ndv < nvar_df_orb; ndv++) {
 #pragma omp simd
             for (int k = kl; k <= ku; k++) {
-              orbital_df_u(ndv,j,i,k+shift)= u_df(ndv,k,j,i);
+              orbital_df_u(ndv,j,i,k+shift)= df_src(ndv,k,j,i);
             }
           }
         }
@@ -148,7 +162,7 @@ void OrbitalAdvection::SetOrbitalAdvectionCC(const AthenaArray<Real> &u,
                                           pmb_->cis, pmb_->cie, pmb_->cjs,
                                           pmb_->cje, pmb_->cks, pmb_->cke);
     if (NDUSTFLUIDS>0)
-      pmb_->pmr->RestrictCellCenteredValues(u_df, df_u_coarse_send, 0, NDUSTVARS-1,
+      pmb_->pmr->RestrictCellCenteredValues(df_src, df_u_coarse_send, 0, nvar_df_orb-1,
                                             pmb_->cis, pmb_->cie, pmb_->cjs,
                                             pmb_->cje, pmb_->cks, pmb_->cke);
     if (NSCALARS>0)

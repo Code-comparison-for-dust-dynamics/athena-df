@@ -133,6 +133,14 @@ class OrbitalAdvection{
   // uniform mesh
   Real dx;
 
+  // Dust variables carried by the remap: the conserved dust variables, followed by the
+  // diffusive dust momentum J (dfccdif.diff_mom_cc) when the dust momentum includes it.
+  // Cons-to-prim, the post-update hook and the dust timestep evaluate (U - J)/rho_d right
+  // after an orbital stage, so U and J are shifted together.
+  int nvar_df_orb;
+  const AthenaArray<Real> *orb_df_src_; // source of the dust remap variables, set per stage
+  AthenaArray<Real> df_uj_;             // U and J side by side when J is carried
+
   // orbital blocks with two meshblock orbital length for variables
   AthenaArray<Real> orbital_cons, orbital_df_u, orbital_scalar;
   AthenaArray<Real> orbital_b1, orbital_b2;

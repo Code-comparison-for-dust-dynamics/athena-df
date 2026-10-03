@@ -37,6 +37,8 @@
 void OrbitalAdvection::CalculateOrbitalAdvectionCC(const Real dt, AthenaArray<Real> &u,
     AthenaArray<Real> &u_df, AthenaArray<Real> &s) {
   if (!orbital_advection_active) return;
+  // remapped together with u_df when nvar_df_orb > NDUSTVARS
+  AthenaArray<Real> &diff_mom = (NDUSTFLUIDS > 0) ? pdf_->dfccdif.diff_mom_cc : u_df;
   int is = pmb_->is, ie = pmb_->ie;
   int js = pmb_->js, je = pmb_->je;
   int ks = pmb_->ks, ke = pmb_->ke;
@@ -63,7 +65,10 @@ void OrbitalAdvection::CalculateOrbitalAdvectionCC(const Real dt, AthenaArray<Re
           }
           // calculate dust fluids flux
           if (NDUSTFLUIDS > 0) {
-            for (int ndv=0; ndv<NDUSTVARS; ++ndv) {
+            for (int ndv=0; ndv<nvar_df_orb; ++ndv) {
+              // the first NDUSTVARS are U, the rest J (see nvar_df_orb)
+              AthenaArray<Real> &df_dst = (ndv < NDUSTVARS) ? u_df : diff_mom;
+              const int ndst = (ndv < NDUSTVARS) ? ndv : ndv - NDUSTVARS;
               dfbuf.InitWithShallowSlice(orbital_df_u, 4, ndv, 1);
               if (dust_xorder <= 2) {
                 RemapFluxPlm(pflux, dfbuf, epsilon, osgn, k, i, js, je+1, shift0);
@@ -71,7 +76,7 @@ void OrbitalAdvection::CalculateOrbitalAdvectionCC(const Real dt, AthenaArray<Re
                 RemapFluxPpm(pflux, dfbuf, epsilon, osgn, k, i, js, je+1, shift0);
               }
               for (int j=js; j<=je; j++) {
-                u_df(ndv,k,j,i) = dfbuf(k,i,j+shift) - (pflux(j+1) - pflux(j));
+                df_dst(ndst,k,j,i) = dfbuf(k,i,j+shift) - (pflux(j+1) - pflux(j));
               }
             }
           }
@@ -114,7 +119,10 @@ void OrbitalAdvection::CalculateOrbitalAdvectionCC(const Real dt, AthenaArray<Re
           }
           // calculate dust fluids flux
           if (NDUSTFLUIDS > 0) {
-            for (int ndv=0; ndv<NDUSTVARS; ++ndv) {
+            for (int ndv=0; ndv<nvar_df_orb; ++ndv) {
+              // the first NDUSTVARS are U, the rest J (see nvar_df_orb)
+              AthenaArray<Real> &df_dst = (ndv < NDUSTVARS) ? u_df : diff_mom;
+              const int ndst = (ndv < NDUSTVARS) ? ndv : ndv - NDUSTVARS;
               dfbuf.InitWithShallowSlice(orbital_df_u, 4, ndv, 1);
               if (dust_xorder <= 2) {
                 RemapFluxPlm(pflux, dfbuf, epsilon, osgn, j, i, ks, ke+1, shift0);
@@ -122,7 +130,7 @@ void OrbitalAdvection::CalculateOrbitalAdvectionCC(const Real dt, AthenaArray<Re
                 RemapFluxPpm(pflux, dfbuf, epsilon, osgn, j, i, ks, ke+1, shift0);
               }
               for (int k=ks; k<=ke; k++) {
-                u_df(ndv,k,j,i) = dfbuf(j,i,k+shift) - (pflux(k+1) - pflux(k));
+                df_dst(ndst,k,j,i) = dfbuf(j,i,k+shift) - (pflux(k+1) - pflux(k));
               }
             }
           }

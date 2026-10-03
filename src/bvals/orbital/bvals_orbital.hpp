@@ -94,6 +94,7 @@ class OrbitalBoundaryCommunication {
   int orbital_send_cc_count_[2][4], orbital_recv_cc_count_[2][4];
   int orbital_send_fc_count_[2][4], orbital_recv_fc_count_[2][4];
   int xgh;
+  int nvar_cc_;  // cell-centered variables per cell: hydro, dust (incl. J if carried), scalars
 
   int *size_cc_send[2];  //same, coarser, fine*4
   int *size_cc_recv[2];  //same, coarser, fine*4
