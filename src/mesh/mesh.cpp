@@ -1978,9 +1978,13 @@ void Mesh::Initialize(int res_flag, ParameterInput *pin) {
   // more than twice the recomputed one stops the run: the factor marks an evident mismatch,
   // not a stability bound, and the run is not silently switched to another trajectory.
   // With STS the number of STS substeps still follows the recomputed dt_parabolic, so bitwise
-  // restarts are not guaranteed with STS. The parameter is registered in every run, so that
-  // restart files carry it and a restart can change it on the command line.
+  // restarts are not guaranteed with STS. The switch is registered in every run, so that
+  // restart files carry it and a restart can change it on the command line. It applies only
+  // to the restart that reads it and is reset to true afterwards: Athena++ would otherwise
+  // carry a false into the restart files of the continued run, and every later restart would
+  // recompute its dt.
   const bool restart_keep_dt = pin->GetOrAddBoolean("time", "restart_keep_dt", true);
+  if (res_flag == 1) pin->SetBoolean("time", "restart_keep_dt", true);
   if ((res_flag == 1) && (fluid_setup != FluidFormulation::fixed) && (dt_restart > 0.0)
       && restart_keep_dt) {
     const Real dt_recomputed = dt;
