@@ -238,7 +238,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   inv_omega_planet = 1.0/omega_planet;
 
   PlanetaryGravityOrder = pin->GetOrAddInteger("problem", "PlanetaryGravityOrder", 2);
-  if ((PlanetaryGravityOrder != 2) || (PlanetaryGravityOrder != 4))
+  if ((PlanetaryGravityOrder != 2) && (PlanetaryGravityOrder != 4))
     PlanetaryGravityOrder = 2;
 
   cs_planet = std::sqrt(cs2_0*std::pow(rad_planet/r0, pslope));
