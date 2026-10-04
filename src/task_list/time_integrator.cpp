@@ -1062,6 +1062,13 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
       state_ready = USER_POST_UPDATE;
     }
 
+    const bool pre_boundary_floors = EquationOfState::PreBoundaryFloorsSupported()
+                                    && pm->fluid_setup == FluidFormulation::evolve;
+    if (pre_boundary_floors) {
+      AddTask(EOS_FLOORS,state_ready);
+      state_ready = EOS_FLOORS;
+    }
+
     AddTask(SEND_HYD,state_ready);
     AddTask(RECV_HYD,NONE);
     AddTask(SETB_HYD,(RECV_HYD|state_ready));
@@ -1103,15 +1110,13 @@ TimeIntegratorTaskList::TimeIntegratorTaskList(ParameterInput *pin, Mesh *pm) {
         AddTask(INT_SCLR,CALC_SCLRFLX);
       }
       AddTask(INT_CHM,INT_SCLR);
-      if (ORBITAL_ADVECTION) {
-        AddTask(SEND_SCLR,CALC_HYDORB);
-        AddTask(RECV_SCLR,NONE);
-        AddTask(SETB_SCLR,(RECV_SCLR|CALC_HYDORB));
-      } else {
-        AddTask(SEND_SCLR,SRC_TERM);
-        AddTask(RECV_SCLR,NONE);
-        AddTask(SETB_SCLR,(RECV_SCLR|SRC_TERM));
-      }
+      // Scalar floors use the accepted gas density, and must precede packing
+      // both same-level and restricted scalar boundary buffers.
+      TaskID scalar_state_ready = pre_boundary_floors ? state_ready
+                                  : (ORBITAL_ADVECTION ? CALC_HYDORB : SRC_TERM);
+      AddTask(SEND_SCLR,scalar_state_ready);
+      AddTask(RECV_SCLR,NONE);
+      AddTask(SETB_SCLR,(RECV_SCLR|scalar_state_ready));
       if (SHEAR_PERIODIC) {
         AddTask(SEND_SCLRSH,SETB_SCLR);
         AddTask(RECV_SCLRSH,SEND_SCLRSH);
@@ -1387,6 +1392,11 @@ void TimeIntegratorTaskList::AddTask(const TaskID& id, const TaskID& dep) {
     task_list_[ntasks].TaskFunc=
         static_cast<TaskStatus (TaskList::*)(MeshBlock*,int)>
         (&TimeIntegratorTaskList::UserPostUpdate);
+    task_list_[ntasks].lb_time = true;
+  } else if (id == EOS_FLOORS) {
+    task_list_[ntasks].TaskFunc=
+        static_cast<TaskStatus (TaskList::*)(MeshBlock*,int)>
+        (&TimeIntegratorTaskList::ApplyConservedFloors);
     task_list_[ntasks].lb_time = true;
   } else if (id == SEND_HYD) {
     task_list_[ntasks].TaskFunc=
@@ -2137,7 +2147,10 @@ TaskStatus TimeIntegratorTaskList::UserPostUpdate(MeshBlock *pmb, int stage) {
   if (stage <= nstages) {
     PostUpdateFunc post_update = pmb->pmy_mesh->GetUserPostUpdateFunction();
     bool final_stage = (stage == nstages);
-    if ((stage_wghts[stage-1].main_stage || final_stage) && post_update != nullptr) {
+    const bool pre_boundary_floors = EquationOfState::PreBoundaryFloorsSupported()
+                                    && pmb->pmy_mesh->fluid_setup == FluidFormulation::evolve;
+    if ((stage_wghts[stage-1].main_stage || final_stage || pre_boundary_floors)
+        && post_update != nullptr) {
       // Orbital-advection-only stages can follow the last hydro main stage.
       bool final_main_stage = stage_wghts[stage-1].main_stage;
       for (int next=stage; next<nstages && final_main_stage; ++next) {
@@ -2148,11 +2161,29 @@ TaskStatus TimeIntegratorTaskList::UserPostUpdate(MeshBlock *pmb, int stage) {
       Real t_end = pmb->pmy_mesh->time
                    + stage_wghts[stage-1].ebeta*pmb->pmy_mesh->dt;
       Real dt = stage_wghts[stage-1].beta*pmb->pmy_mesh->dt;
-      post_update(pmb, t_start, t_end, dt, stage, final_stage, final_main_stage);
+      post_update(pmb, t_start, t_end, dt, stage, stage_wghts[stage-1].main_stage,
+                  final_stage, final_main_stage);
     }
     return TaskStatus::next;
   }
   return TaskStatus::fail;
+}
+
+// Floors must precede restriction/sending, including orbital-advection-only stages.
+// The later cons-to-prim still floors coarse buffers and interpolated ghost states.
+TaskStatus TimeIntegratorTaskList::ApplyConservedFloors(MeshBlock *pmb, int stage) {
+  if (stage > nstages) return TaskStatus::fail;
+  pmb->peos->ApplyHydroConservedFloors(pmb->phydro->u,
+      pmb->is, pmb->ie, pmb->js, pmb->je, pmb->ks, pmb->ke);
+  if (NDUSTFLUIDS > 0) {
+    pmb->peos->ApplyDustFluidsConservedFloors(pmb->pdustfluids->df_u,
+        pmb->is, pmb->ie, pmb->js, pmb->je, pmb->ks, pmb->ke);
+  }
+  if (NSCALARS > 0) {
+    pmb->peos->ApplyScalarConservedFloors(pmb->pscalars->s, pmb->phydro->u,
+        pmb->is, pmb->ie, pmb->js, pmb->je, pmb->ks, pmb->ke);
+  }
+  return TaskStatus::next;
 }
 
 //----------------------------------------------------------------------------------------

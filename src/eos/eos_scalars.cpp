@@ -21,6 +21,20 @@
 #include "../scalars/scalars.hpp"
 #include "eos.hpp"
 
+void EquationOfState::ApplyScalarConservedFloors(AthenaArray<Real> &s,
+    const AthenaArray<Real> &u, int il, int iu, int jl, int ju, int kl, int ku) {
+  for (int n=0; n<NSCALARS; ++n) {
+    for (int k=kl; k<=ku; ++k) {
+      for (int j=jl; j<=ju; ++j) {
+#pragma omp simd
+        for (int i=il; i<=iu; ++i) {
+          FloorConservedScalar(s(n,k,j,i), u(IDN,k,j,i));
+        }
+      }
+    }
+  }
+}
+
 //----------------------------------------------------------------------------------------
 //! \fn void EquationOfState::PassiveScalarConservedToPrimitive(AthenaArray<Real> &s,
 //!           const AthenaArray<Real> &u, const AthenaArray<Real> &r_old,
@@ -44,7 +58,7 @@ void EquationOfState::PassiveScalarConservedToPrimitive(
           Real& r_n  = r(n,k,j,i);
           // apply passive scalars floor to conserved variable first, then transform:
           // (multi-D fluxes may have caused it to drop below floor)
-          s_n = (s_n < scalar_floor_ * d) ?  scalar_floor_ * d : s_n;
+          FloorConservedScalar(s_n, d);
           r_n = s_n/d;
           // TODO(felker): continue to monitor the acceptability of this absolute 0. floor
           // (may create very large global conservation violations, e.g. the first few

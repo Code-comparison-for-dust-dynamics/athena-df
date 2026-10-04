@@ -540,7 +540,10 @@ void ATHDF5Output::WriteOutputFile(Mesh *pm, ParameterInput *pin, bool flag) {
   }
   attribute = H5Acreate2(file, "Coordinates", string_type, dataspace_scalar,
                          H5P_DEFAULT, H5P_DEFAULT);
-  H5Awrite(attribute, string_type, COORDINATE_SYSTEM);
+  // HDF5 reads the full fixed-width string, not just up to the first null byte.
+  char coordinate_name[max_name_length+1];
+  std::strncpy(coordinate_name, COORDINATE_SYSTEM, sizeof(coordinate_name));
+  H5Awrite(attribute, string_type, coordinate_name);
   H5Aclose(attribute);
 
   // Write extent of grid in x1-direction

@@ -63,23 +63,22 @@ void EquationOfState::ConservedToPrimitive(
         Real& w_vz = prim(IVZ,k,j,i);
         Real& w_p  = prim(IPR,k,j,i);
 
-        // apply density floor, without changing momentum or energy
-        u_d = (u_d > density_floor_) ?  u_d : density_floor_;
-        w_d = u_d;
+        const HydroFloorState floor_state = HydroConservedFloorState(u_d, u_m1, u_m2,
+            u_m3, u_e, internal_energy_floor);
+        u_d = floor_state.density;
+        w_d = floor_state.density;
 
-        Real di = 1.0/u_d;
+        Real di = floor_state.inverse_density;
         w_vx = u_m1*di;
         w_vy = u_m2*di;
         w_vz = u_m3*di;
 
-        Real e_k = 0.5*di*(SQR(u_m1) + SQR(u_m2) + SQR(u_m3));
-        w_p = gm1*(u_e - e_k);
+        w_p = gm1*(u_e - floor_state.kinetic_energy);
 
         // Compare in total-energy space so rebuilding primitives from a restart is
         // idempotent even when subtracting e_k would suffer cancellation.
-        Real e_floor = internal_energy_floor + e_k;
-        if (!(u_e > e_floor)) {
-          u_e = e_floor;
+        if (floor_state.energy_floored) {
+          u_e = floor_state.energy_floor;
           w_p = pressure_floor_;
         }
       }

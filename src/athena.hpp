@@ -64,6 +64,7 @@ class CosmicRay;
 //! \brief stores logical location and level of MeshBlock
 
 struct LogicalLocation { // aggregate and POD type
+  // Restart files pack the members one by one (outputs/restart.cpp); add new ones there.
   // These values can exceed the range of std::int32_t even if the root grid has only a
   // single MeshBlock if >30 levels of AMR are used, since the corresponding max index =
   // 1*2^31 > INT_MAX = 2^31 -1 for most 32-bit signed integer type impelementations
@@ -86,6 +87,7 @@ bool operator==(const LogicalLocation &l1, const LogicalLocation &l2);
 //! \brief physical size and number of cells in a Mesh or a MeshBlock
 
 struct RegionSize {  // aggregate and POD type; do NOT reorder member declarations:
+  // Restart files pack the members one by one (outputs/restart.cpp); add new ones there.
   Real x1min, x2min, x3min;
   Real x1max, x2max, x3max;
   Real x1rat, x2rat, x3rat; // ratio of dxf(i)/dxf(i-1)
@@ -198,8 +200,10 @@ using SrcTermFunc = void (*)(
     MeshBlock *pmb, const Real time, const Real dt, const AthenaArray<Real> &prim,
     const AthenaArray<Real> &prim_df, const AthenaArray<Real> &prim_scalar, const AthenaArray<Real> &bcc,
     AthenaArray<Real> &cons, AthenaArray<Real> &cons_df, AthenaArray<Real> &cons_scalar);
+// The pre-boundary floor path also calls this after the initial OA-only half step.
 using PostUpdateFunc = void (*)(MeshBlock *pmb, const Real t_start, const Real t_end,
-                               const Real dt, const int stage, const bool final_stage,
+                               const Real dt, const int stage, const bool main_stage,
+                               const bool final_stage,
                                const bool final_main_stage);
 using TimeStepFunc = Real (*)(MeshBlock *pmb);
 using HistoryOutputFunc = Real (*)(MeshBlock *pmb, int iout);

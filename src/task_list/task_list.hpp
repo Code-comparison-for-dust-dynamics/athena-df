@@ -161,6 +161,7 @@ class TimeIntegratorTaskList : public TaskList {
 
   TaskStatus AddSourceTerms(MeshBlock *pmb, int stage);
   TaskStatus UserPostUpdate(MeshBlock *pmb, int stage);
+  TaskStatus ApplyConservedFloors(MeshBlock *pmb, int stage);
 
   TaskStatus DiffuseHydro(MeshBlock *pmb, int stage);
   TaskStatus DiffuseField(MeshBlock *pmb, int stage);
@@ -423,6 +424,7 @@ const TaskID SEND_DFSSH(87);
 const TaskID RECV_DFSFLXSH(88);
 const TaskID RECV_DFSSH(89);
 const TaskID USER_POST_UPDATE(90);
+const TaskID EOS_FLOORS(91);
 
 }  // namespace HydroIntegratorTaskNames
 #endif  // TASK_LIST_TASK_LIST_HPP_

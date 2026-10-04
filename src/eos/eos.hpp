@@ -34,6 +34,19 @@ class EquationOfState {
  public:
   EquationOfState(MeshBlock *pmb, ParameterInput *pin);
 
+  // Ideal-gas and isothermal hydro have a conserved-only pre-boundary floor pass.
+  // MHD, general/relativistic EOS and STS keep their existing floor placement.
+  static constexpr bool PreBoundaryFloorsSupported() {
+    return !MAGNETIC_FIELDS_ENABLED && !GENERAL_EOS
+           && !RELATIVISTIC_DYNAMICS && !STS_ENABLED;
+  }
+  void ApplyHydroConservedFloors(AthenaArray<Real> &cons,
+      int il, int iu, int jl, int ju, int kl, int ku);
+  void ApplyDustFluidsConservedFloors(AthenaArray<Real> &cons_df,
+      int il, int iu, int jl, int ju, int kl, int ku);
+  void ApplyScalarConservedFloors(AthenaArray<Real> &s, const AthenaArray<Real> &u,
+      int il, int iu, int jl, int ju, int kl, int ku);
+
   void ConservedToPrimitive(
       AthenaArray<Real> &cons, const AthenaArray<Real> &prim_old, const FaceField &b,
       AthenaArray<Real> &prim, AthenaArray<Real> &bcc,
@@ -178,6 +191,40 @@ class EquationOfState {
 #endif
 
  private:
+  void FloorConservedScalar(Real &scalar, const Real density) const {
+    const Real floor = scalar_floor_*density;
+    scalar = (scalar < floor) ? floor : scalar;
+  }
+  static void FloorConservedDensity(Real &density, const Real floor) {
+    density = (density > floor) ? density : floor;
+  }
+
+#if NON_BAROTROPIC_EOS
+  struct HydroFloorState {
+    Real density;          // density after the density floor
+    Real inverse_density;
+    Real kinetic_energy;
+    Real energy_floor;     // internal-energy floor + kinetic energy
+    bool energy_floored;   // total energy is not above energy_floor
+  };
+  // Shared by pre-boundary floors and W(U) so both make the same floor decision. It only
+  // computes; each caller stores the results itself, in the order that lets its loop
+  // vectorize. Matching results in the two loops also require the value-safe
+  // floating-point flags set in configure.py (no FMA contraction across statements).
+  HydroFloorState HydroConservedFloorState(const Real density, const Real m1,
+      const Real m2, const Real m3, const Real energy,
+      const Real internal_energy_floor) const {
+    HydroFloorState state;
+    state.density = density;
+    FloorConservedDensity(state.density, density_floor_);
+    state.inverse_density = 1.0/state.density;
+    state.kinetic_energy = 0.5*state.inverse_density*(SQR(m1) + SQR(m2) + SQR(m3));
+    state.energy_floor = internal_energy_floor + state.kinetic_energy;
+    state.energy_floored = !(energy > state.energy_floor);
+    return state;
+  }
+#endif
+
   // (C++11) in-class Default Member Initializer (fallback option):
   const Real float_min{std::numeric_limits<float>::min()};
   MeshBlock *pmy_block_;                 // ptr to MeshBlock containing this EOS

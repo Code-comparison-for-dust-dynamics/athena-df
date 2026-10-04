@@ -585,7 +585,9 @@ if args['cxx'] == 'g++':
     definitions['COMPILER_CHOICE'] = 'g++'
     definitions['COMPILER_COMMAND'] = makefile_options['COMPILER_COMMAND'] = 'g++'
     makefile_options['PREPROCESSOR_FLAGS'] = ''
-    makefile_options['COMPILER_FLAGS'] = '-O3 -std=c++11'
+    # -ffp-contract=off: GCC otherwise fuses multiply-adds across statements depending on
+    # the surrounding code, so the EOS floor pass and W(U) could round differently
+    makefile_options['COMPILER_FLAGS'] = '-O3 -std=c++11 -ffp-contract=off'
     makefile_options['LINKER_FLAGS'] = ''
     makefile_options['LIBRARY_FLAGS'] = ''
 if args['cxx'] == 'g++-simd':
@@ -594,7 +596,7 @@ if args['cxx'] == 'g++-simd':
     definitions['COMPILER_COMMAND'] = makefile_options['COMPILER_COMMAND'] = 'g++'
     makefile_options['PREPROCESSOR_FLAGS'] = ''
     makefile_options['COMPILER_FLAGS'] = (
-        '-O3 -std=c++11 -fopenmp-simd -fwhole-program -flto -ffast-math '
+        '-O3 -std=c++11 -fopenmp-simd -fwhole-program -flto -ffp-contract=off '
         '-march=native -fprefetch-loop-arrays'
         # -march=skylake-avx512, skylake, core-avx2
         # -mprefer-vector-width=128  # available in gcc-8, but not gcc-7
@@ -612,7 +614,7 @@ if args['cxx'] == 'icpx':
     # ICX drivers icx and icpx will accept ICC Classic Compiler options or Clang*/LLVM
     # Compiler options
     makefile_options['COMPILER_FLAGS'] = (
-      '-O3 -std=c++11 -ipo -xhost -qopenmp-simd '
+      '-O3 -std=c++11 -ipo -xhost -qopenmp-simd -fp-model=precise '
       '-Wno-tautological-constant-compare -Wno-array-bounds'
     )
     # Currently unsupported, but "options to be supported" according to icpx
@@ -626,6 +628,7 @@ if args['cxx'] == 'icpc':
     makefile_options['PREPROCESSOR_FLAGS'] = ''
     makefile_options['COMPILER_FLAGS'] = (
       '-O3 -std=c++11 -ipo -xhost -inline-forceinline -qopenmp-simd -qopt-prefetch=4 '
+      '-fp-model precise '
       '-qoverride-limits '  # -qopt-report-phase=ipo (does nothing without -ipo)
       '-diag-disable=10441'  # The Intel(R) C++ Compiler Classic (ICC) is deprecated
     )

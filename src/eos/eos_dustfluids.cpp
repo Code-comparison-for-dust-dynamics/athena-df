@@ -22,6 +22,22 @@
 #include "../parameter_input.hpp"
 #include "eos.hpp"
 
+void EquationOfState::ApplyDustFluidsConservedFloors(AthenaArray<Real> &cons_df,
+    int il, int iu, int jl, int ju, int kl, int ku) {
+  for (int n=0; n<NDUSTFLUIDS; ++n) {
+    const int rho_id = 4*n;
+    for (int k=kl; k<=ku; ++k) {
+      for (int j=jl; j<=ju; ++j) {
+#pragma omp simd
+        for (int i=il; i<=iu; ++i) {
+          // Leave U and J unchanged, including when U contains diffusion momentum.
+          FloorConservedDensity(cons_df(rho_id,k,j,i), dustfluids_floor_[n]);
+        }
+      }
+    }
+  }
+}
+
 //----------------------------------------------------------------------------------------
 //! \fn void EquationOfState::DustFluidsConservedToPrimitive(AthenaArray<Real> &cons_df,
 //!           const AthenaArray<Real> &prim_df_old,
@@ -68,7 +84,7 @@ void EquationOfState::DustFluidsConservedToPrimitive(
 
             // apply dust fluids floor to conserved variable first, then transform:
             // (multi-D fluxes may have caused it to drop below floor)
-            cons_dust_dens = (cons_dust_dens > dustfluids_floor_[dust_id]) ? cons_dust_dens : dustfluids_floor_[dust_id];
+            FloorConservedDensity(cons_dust_dens, dustfluids_floor_[dust_id]);
             prim_dust_rho  = cons_dust_dens;
 
             Real inv_dust_dens = 1.0/cons_dust_dens;
@@ -102,7 +118,7 @@ void EquationOfState::DustFluidsConservedToPrimitive(
 
             // apply dust fluids floor to conserved variable first, then transform:
             // (multi-D fluxes may have caused it to drop below floor)
-            cons_dust_dens = (cons_dust_dens > dustfluids_floor_[dust_id]) ? cons_dust_dens : dustfluids_floor_[dust_id];
+            FloorConservedDensity(cons_dust_dens, dustfluids_floor_[dust_id]);
             prim_dust_rho  = cons_dust_dens;
 
             Real inv_dust_dens = 1.0/cons_dust_dens;

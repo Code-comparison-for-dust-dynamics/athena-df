@@ -9,8 +9,9 @@
 // C headers
 
 // C++ headers
+#include <cstddef>   // offsetof
 #include <cstdio>    // snprintf()
-#include <cstring>   // memcpy()
+#include <cstring>   // memcpy(), memset()
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -33,6 +34,40 @@
 #include "../parameter_input.hpp"
 #include "../scalars/scalars.hpp"
 #include "./outputs.hpp"
+
+namespace {
+// Restart files store RegionSize and LogicalLocation with their in-memory layout. Copy the
+// fields one by one into a zeroed buffer at their own offsets, so padding bytes are written
+// as zeros instead of leftover memory. Sizes and offsets are unchanged; readers need no change.
+template <typename T>
+void PackField(char *buf, const std::size_t offset, const T &value) {
+  std::memcpy(buf + offset, &value, sizeof(T));
+}
+
+void PackRegionSize(char *buf, const RegionSize &size) {
+  std::memset(buf, 0, sizeof(RegionSize));
+  PackField(buf, offsetof(RegionSize, x1min), size.x1min);
+  PackField(buf, offsetof(RegionSize, x2min), size.x2min);
+  PackField(buf, offsetof(RegionSize, x3min), size.x3min);
+  PackField(buf, offsetof(RegionSize, x1max), size.x1max);
+  PackField(buf, offsetof(RegionSize, x2max), size.x2max);
+  PackField(buf, offsetof(RegionSize, x3max), size.x3max);
+  PackField(buf, offsetof(RegionSize, x1rat), size.x1rat);
+  PackField(buf, offsetof(RegionSize, x2rat), size.x2rat);
+  PackField(buf, offsetof(RegionSize, x3rat), size.x3rat);
+  PackField(buf, offsetof(RegionSize, nx1), size.nx1);
+  PackField(buf, offsetof(RegionSize, nx2), size.nx2);
+  PackField(buf, offsetof(RegionSize, nx3), size.nx3);
+}
+
+void PackLogicalLocation(char *buf, const LogicalLocation &loc) {
+  std::memset(buf, 0, sizeof(LogicalLocation));
+  PackField(buf, offsetof(LogicalLocation, lx1), loc.lx1);
+  PackField(buf, offsetof(LogicalLocation, lx2), loc.lx2);
+  PackField(buf, offsetof(LogicalLocation, lx3), loc.lx3);
+  PackField(buf, offsetof(LogicalLocation, level), loc.level);
+}
+} // namespace
 
 
 //----------------------------------------------------------------------------------------
@@ -106,7 +141,9 @@ void RestartOutput::WriteOutputFile(Mesh *pm, ParameterInput *pin, bool force_wr
     // output Mesh information
     resfile.Write(&(pm->nbtotal), sizeof(int), 1);
     resfile.Write(&(pm->root_level), sizeof(int), 1);
-    resfile.Write(&(pm->mesh_size), sizeof(RegionSize), 1);
+    char mesh_size_buf[sizeof(RegionSize)];
+    PackRegionSize(mesh_size_buf, pm->mesh_size);
+    resfile.Write(mesh_size_buf, sizeof(RegionSize), 1);
     resfile.Write(&(pm->time), sizeof(Real), 1);
     resfile.Write(&(pm->dt), sizeof(Real), 1);
     resfile.Write(&(pm->ncycle), sizeof(int), 1);
@@ -139,7 +176,7 @@ void RestartOutput::WriteOutputFile(Mesh *pm, ParameterInput *pin, bool force_wr
   int os=0;
   for (int b=0; b<pm->nblocal; ++b) {
     MeshBlock *pmb = pm->my_blocks(b);
-    std::memcpy(&(idlist[os]), &(pmb->loc), sizeof(LogicalLocation));
+    PackLogicalLocation(&(idlist[os]), pmb->loc);
     os += sizeof(LogicalLocation);
     std::memcpy(&(idlist[os]), &(pmb->cost_), sizeof(double));
     os += sizeof(double);

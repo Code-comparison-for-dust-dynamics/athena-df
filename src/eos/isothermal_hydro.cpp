@@ -55,7 +55,7 @@ void EquationOfState::ConservedToPrimitive(
         Real& w_vz = prim(IVZ,k,j,i);
 
         // apply density floor, without changing momentum or energy
-        u_d = (u_d > density_floor_) ?  u_d : density_floor_;
+        FloorConservedDensity(u_d, density_floor_);
         w_d = u_d;
 
         Real di = 1.0/u_d;

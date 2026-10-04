@@ -151,7 +151,8 @@ void OuterWaveDampingDust(MeshBlock *pmb, const Real dt, int il, int iu,
     int jl, int ju, int kl, int ku, AthenaArray<Real> &cons_df);
 void PinDustBeforeRelease(MeshBlock *pmb);
 void PostUpdate(MeshBlock *pmb, const Real t_start, const Real t_end,
-    const Real dt, const int stage, const bool final_stage, const bool final_main_stage);
+    const Real dt, const int stage, const bool main_stage, const bool final_stage,
+    const bool final_main_stage);
 void DustDensityPercentFloor(MeshBlock *pmb, int il, int iu, int jl, int ju, int kl, int ku,
       AthenaArray<Real> &prim_df, AthenaArray<Real> &cons_df);
 
@@ -1811,6 +1812,12 @@ void PinDustBeforeRelease(MeshBlock *pmb) {
   if (NDUSTFLUIDS <= 0) return;
   const Real t_release = pmb->pdustfluids->dfdrag.time_drag;
   if ((t_release <= 0.0) || (pmb->pmy_mesh->time >= t_release)) return;
+  if (EquationOfState::PreBoundaryFloorsSupported()
+      && pmb->pmy_mesh->fluid_setup == FluidFormulation::evolve) {
+    // Pin to the accepted gas density, not to a state the later EOS would change.
+    pmb->peos->ApplyHydroConservedFloors(pmb->phydro->u,
+        pmb->is, pmb->ie, pmb->js, pmb->je, pmb->ks, pmb->ke);
+  }
   const AthenaArray<Real> &u = pmb->phydro->u;
   AthenaArray<Real> &cons_df = pmb->pdustfluids->df_u;
   for (int n=0; n<NDUSTFLUIDS; ++n) {
@@ -1834,9 +1841,11 @@ void PinDustBeforeRelease(MeshBlock *pmb) {
 }
 
 void PostUpdate(MeshBlock *pmb, const Real t_start, const Real t_end,
-    const Real dt, const int stage, const bool final_stage, const bool final_main_stage) {
-  (void)t_start; (void)t_end; (void)dt; (void)stage; (void)final_stage;
-  // Damping must precede the final OA-only stage. That stage performs the last standard
+    const Real dt, const int stage, const bool main_stage, const bool final_stage,
+    const bool final_main_stage) {
+  (void)t_start; (void)t_end; (void)dt; (void)stage; (void)main_stage; (void)final_stage;
+  // With pre-boundary floors this also runs on OA-only stages, where only the dust
+  // pinning below acts. Damping must precede the final OA-only stage. That stage performs the last standard
   // boundary exchange/prolongation and leaves restart-rebuilt SMR ghost states identical to
   // uninterrupted evolution. It acts once per cycle with the cycle timestep.
   if (final_main_stage) {

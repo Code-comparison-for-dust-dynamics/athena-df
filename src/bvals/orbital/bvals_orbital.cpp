@@ -46,14 +46,14 @@ OrbitalBoundaryCommunication::OrbitalBoundaryCommunication(
       pmy_block_(porb->pmb_), pmy_mesh_(porb->pm_),
       pbval_(porb->pbval_), pmy_orbital_(porb) {
   for (int upper=0; upper<2; upper++) {
-    InitBoundaryData(orbital_bd_cc_[upper], BoundaryQuantity::orbital_cc);
+    InitBoundaryData(orbital_bd_cc_[upper], BoundaryQuantity::orbital_cc, upper);
   }
 #ifdef MPI_PARALLEL
   orbital_advection_cc_phys_id_ = pbval_->AdvanceCounterPhysID(max_phys_id);
 #endif
   if (MAGNETIC_FIELDS_ENABLED) {
     for (int upper=0; upper<2; upper++) {
-      InitBoundaryData(orbital_bd_fc_[upper], BoundaryQuantity::orbital_fc);
+      InitBoundaryData(orbital_bd_fc_[upper], BoundaryQuantity::orbital_fc, upper);
     }
 #ifdef MPI_PARALLEL
     orbital_advection_fc_phys_id_ = orbital_advection_cc_phys_id_+1;
@@ -103,10 +103,10 @@ OrbitalBoundaryCommunication::~OrbitalBoundaryCommunication() {
 
 //----------------------------------------------------------------------------------------
 //! \fn void OrbitalBoundaryCommunication::InitBoundaryData(
-//!            OrbitalBoundaryData &bd, BoundaryQuantity type)
+//!            OrbitalBoundaryData &bd, BoundaryQuantity type, int upper)
 //! \brief allocate memory for orbital communicaiton
 void OrbitalBoundaryCommunication::InitBoundaryData(
-     OrbitalBoundaryData &bd, BoundaryQuantity type) {
+     OrbitalBoundaryData &bd, BoundaryQuantity type, int upper) {
   MeshBlock *pmb = pmy_block_;
   OrbitalAdvection *porb = pmy_orbital_;
   int nx1 = pmb->block_size.nx1;
@@ -115,6 +115,11 @@ void OrbitalBoundaryCommunication::InitBoundaryData(
 
   if (porb->orbital_refinement) {
     int ssize(0), lsize(0);
+    // FC (MHD) buffers still use the original capacity estimates below, without
+    // the runtime growth used for CC buffers. Before relying on MHD orbital
+    // refinement, check the computed FC message counts against these capacities,
+    // especially for small blocks and large remap offsets; CC estimates have
+    // been insufficient for interpolation strips on small blocks.
     if (porb->orbital_direction == 1) {
       if (nx3>1) { //3D
         bd.nbmax = 4;
@@ -170,6 +175,10 @@ void OrbitalBoundaryCommunication::InitBoundaryData(
       }
     }
     for (int n=0; n<bd.nbmax; n++) {
+      if (type == BoundaryQuantity::orbital_cc) {
+        orbital_send_cc_capacity_[upper][n] = (n==0) ? lsize : ssize;
+        orbital_recv_cc_capacity_[upper][n] = (n==0) ? lsize : ssize;
+      }
       if (n==0) {
         bd.send[n]  = new Real[lsize];
         bd.recv[n]  = new Real[lsize];
@@ -213,6 +222,10 @@ void OrbitalBoundaryCommunication::InitBoundaryData(
       }
     }
     for (int n=0; n<bd.nbmax; n++) {
+      if (type == BoundaryQuantity::orbital_cc) {
+        orbital_send_cc_capacity_[upper][n] = size;
+        orbital_recv_cc_capacity_[upper][n] = size;
+      }
       bd.send[n]  = new Real[size];
       bd.recv[n]  = new Real[size];
       bd.flag[n]  = BoundaryStatus::waiting;
@@ -474,7 +487,34 @@ void OrbitalBoundaryCommunication::ComputeOrbit(const Real dt) {
       }
     }
   }
+  EnsureCellCenteredBufferCapacity();
   return;
+}
+
+// Small blocks can need a coarse-to-fine interpolation strip larger than the
+// constructor's half-block estimate, even for a subcell orbital displacement.
+// Grow before posting receives or packing; the previous stage completed its MPI
+// requests in ClearBoundary, and every local block starts up before any sends.
+void OrbitalBoundaryCommunication::EnsureCellCenteredBufferCapacity() {
+  for (int upper=0; upper<2; ++upper) {
+    OrbitalBoundaryData &bd = orbital_bd_cc_[upper];
+    for (int n=0; n<bd.nbmax; ++n) {
+      const int send_size = nvar_cc_*orbital_send_cc_count_[upper][n];
+      const int recv_size = nvar_cc_*orbital_recv_cc_count_[upper][n];
+      if (send_size > orbital_send_cc_capacity_[upper][n]) {
+        Real *buffer = new Real[send_size];
+        delete[] bd.send[n];
+        bd.send[n] = buffer;
+        orbital_send_cc_capacity_[upper][n] = send_size;
+      }
+      if (recv_size > orbital_recv_cc_capacity_[upper][n]) {
+        Real *buffer = new Real[recv_size];
+        delete[] bd.recv[n];
+        bd.recv[n] = buffer;
+        orbital_recv_cc_capacity_[upper][n] = recv_size;
+      }
+    }
+  }
 }
 
 //----------------------------------------------------------------------------------------
@@ -3420,7 +3460,7 @@ void OrbitalBoundaryCommunication::LoadScalarBufferToFiner(Real *buf, int &p, in
         ku = pmb->ke+1;
       } else if (nb<8) {
         kl = pmb->ks-1;
-        ku = pmb->ke+size_cc_send[0][2+nb-4]-onx-1;
+        ku = pmb->ke+size_cc_send[1][2+nb-4]-onx-1;
       } else {
         std::stringstream msg;
         msg << "### FATAL ERROR in OrbitalBoundaryCommunication"

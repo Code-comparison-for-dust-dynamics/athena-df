@@ -1639,6 +1639,20 @@ void Mesh::Initialize(int res_flag, ParameterInput *pin) {
 #pragma omp for private(pmb,pbval)
       for (int i=0; i<nblocal; ++i) {
         pmb = my_blocks(i); pbval = pmb->pbval;
+        if (EquationOfState::PreBoundaryFloorsSupported()
+            && fluid_setup == FluidFormulation::evolve) {
+          // Match the integrator even for a fresh-run checkpoint at cycle zero.
+          pmb->peos->ApplyHydroConservedFloors(pmb->phydro->u,
+              pmb->is, pmb->ie, pmb->js, pmb->je, pmb->ks, pmb->ke);
+          if (NDUSTFLUIDS > 0) {
+            pmb->peos->ApplyDustFluidsConservedFloors(pmb->pdustfluids->df_u,
+                pmb->is, pmb->ie, pmb->js, pmb->je, pmb->ks, pmb->ke);
+          }
+          if (NSCALARS > 0) {
+            pmb->peos->ApplyScalarConservedFloors(pmb->pscalars->s, pmb->phydro->u,
+                pmb->is, pmb->ie, pmb->js, pmb->je, pmb->ks, pmb->ke);
+          }
+        }
         pmb->phydro->hbvar.SwapHydroQuantity(pmb->phydro->u,
                                                HydroBoundaryQuantity::cons);
         pmb->phydro->hbvar.SendBoundaryBuffers();

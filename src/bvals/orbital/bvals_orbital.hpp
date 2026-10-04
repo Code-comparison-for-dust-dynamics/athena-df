@@ -50,7 +50,8 @@ class OrbitalBoundaryCommunication {
   static constexpr int max_phys_id = 2;
 
  private:
-  void InitBoundaryData(OrbitalBoundaryData &bd, BoundaryQuantity type);
+  void InitBoundaryData(OrbitalBoundaryData &bd, BoundaryQuantity type, int upper);
+  void EnsureCellCenteredBufferCapacity();
   void DestroyBoundaryData(OrbitalBoundaryData &bd);
 
   void LoadHydroBufferSameLevel(Real *buf, int &p, const int nb);
@@ -92,6 +93,7 @@ class OrbitalBoundaryCommunication {
   OrbitalBoundaryData orbital_bd_cc_[2], orbital_bd_fc_[2];
   SimpleNeighborBlock orbital_send_neighbor_[2][4], orbital_recv_neighbor_[2][4];
   int orbital_send_cc_count_[2][4], orbital_recv_cc_count_[2][4];
+  int orbital_send_cc_capacity_[2][4], orbital_recv_cc_capacity_[2][4];
   int orbital_send_fc_count_[2][4], orbital_recv_fc_count_[2][4];
   int xgh;
   int nvar_cc_;  // cell-centered variables per cell: hydro, dust (incl. J if carried), scalars
