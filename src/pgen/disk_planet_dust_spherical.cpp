@@ -44,6 +44,15 @@
 #endif
 //#define COROT_WITH_PL // RL: added for sims in co-rotating frames 
 
+// User output variables per dust species (see InitUserMeshBlockData): the diffusive momentum,
+// plus the advective velocity when the HDF5 output is single precision (no -h5double).
+// Ported from athena-df_rebound (disk_planet_dust_spherical_rebound.cpp).
+#if H5_DOUBLE_PRECISION_ENABLED
+constexpr int kUovPerDust = 3;
+#else
+constexpr int kUovPerDust = 6;
+#endif
+
 namespace {
 
 void GetCylCoordInSpherical(Coordinates *pco, Real &rad, Real &phi, Real &z,
@@ -351,11 +360,60 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   if (adaptive)
     EnrollUserRefinementCondition(RefinementCondition);
 
+#if (NDUSTFLUIDS > 0) && !H5_DOUBLE_PRECISION_ENABLED
+  // With orbital advection on, an output block without orbital_system = 1 converts cons and
+  // prim out of the orbital-advection frame but never uov, so dust_<n>_adv_vel would not
+  // match them.  (The diffusive momentum does not depend on the frame.)
+  if (Globals::my_rank == 0 && orbital_advection != 0) {
+    for (InputBlock *pb = pin->pfirst_block; pb != nullptr; pb = pb->pnext) {
+      if (pb->block_name.compare(0, 6, "output") != 0
+          || !pin->DoesParameterExist(pb->block_name, "variable")) continue;
+      std::stringstream vars(pin->GetString(pb->block_name, "variable"));
+      bool has_uov = false;
+      for (std::string v; std::getline(vars, v, ',');)
+        has_uov = has_uov || v == "uov" || v == "user_out_var";
+      if (has_uov && !(pin->DoesParameterExist(pb->block_name, "orbital_system")
+                       && pin->GetBoolean(pb->block_name, "orbital_system")))
+        std::cout << "### WARNING: <" << pb->block_name << "> writes uov without "
+                  << "orbital_system = 1: its cons/prim velocities are frame-converted, "
+                  << "dust_<n>_adv_vel is not." << std::endl;
+    }
+  }
+#endif
+
   return;
 }
 
 
 void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
+
+  // Dust diffusive momentum, as a user output variable.  df_u holds the TOTAL dust momentum
+  // while df_w's velocity is only the advective part, so the diffusive piece is their
+  // difference -- the one quantity a prim dump cannot reproduce.  Emitting it here lets a
+  // single `variable = cons,uov,p` dump carry everything the flux decomposition needs, instead
+  // of a cons+prim pair.  The output block must set orbital_system = 1: otherwise cons/prim
+  // velocities are converted out of the orbital-advection frame and dust_<n>_adv_vel is not.
+  //
+  // Single-precision HDF5 output (no -h5double) also gets the advective velocity itself.
+  // Rebuilding it as (total - diffusive)/rho from fp32 fields loses bits where settling and
+  // vertical diffusion nearly cancel; written directly, it is rounded once from its fp64
+  // state.  fp64 dumps rebuild it offline far below fp32 precision, so they carry only the
+  // diffusive momentum.
+#if (NDUSTFLUIDS > 0)
+  AllocateUserOutputVariables(kUovPerDust*NDUSTFLUIDS);
+  for (int n=0; n<NDUSTFLUIDS; ++n) {
+    for (int c=0; c<3; ++c) {
+      std::stringstream vname;
+      vname << "dust_" << n+1 << "_diff_mom" << c+1;
+      SetUserOutputVariableName(kUovPerDust*n+c, vname.str().c_str());
+      if (kUovPerDust == 6) {
+        std::stringstream aname;
+        aname << "dust_" << n+1 << "_adv_vel" << c+1;
+        SetUserOutputVariableName(kUovPerDust*n+3+c, aname.str().c_str());
+      }
+    }
+  }
+#endif
 
   AllocateRealUserMeshBlockDataField(4);
   Real orb_defined;
@@ -1971,5 +2029,40 @@ void Mesh::UserWorkInLoop() {
 
   // Dust evolution uses the cycle-start release predicate, not a duty-cycle switch.
 
+  return;
+}
+
+//========================================================================================
+//! \fn void MeshBlock::UserWorkBeforeOutput(ParameterInput *pin)
+//! \brief Fill the dust user output variables (see InitUserMeshBlockData) from the fp64
+//!        state.  Ported from athena-df_rebound.
+//========================================================================================
+
+void MeshBlock::UserWorkBeforeOutput(ParameterInput *pin) {
+#if (NDUSTFLUIDS > 0)
+  // The whole block, ghost zones included: an output with ghost_zones = true writes them, and
+  // df_u/df_w are valid there (boundary exchange, prolongation and physical BCs), so the user
+  // output variables match the cons/prim written next to them.
+  for (int n=0; n<NDUSTFLUIDS; ++n) {
+    const int rho_id = 4*n;
+    for (int c=0; c<3; ++c) {
+      const int mom_id = rho_id + 1 + c;
+      for (int k=0; k<ncells3; ++k) {
+        for (int j=0; j<ncells2; ++j) {
+#pragma omp simd
+          for (int i=0; i<ncells1; ++i) {
+            user_out_var(kUovPerDust*n+c, k, j, i) = pdustfluids->df_u(mom_id, k, j, i)
+                - pdustfluids->df_w(rho_id, k, j, i)*pdustfluids->df_w(mom_id, k, j, i);
+          }
+          if (kUovPerDust == 6) {
+#pragma omp simd
+            for (int i=0; i<ncells1; ++i)
+              user_out_var(kUovPerDust*n+3+c, k, j, i) = pdustfluids->df_w(mom_id, k, j, i);
+          }
+        }
+      }
+    }
+  }
+#endif
   return;
 }
