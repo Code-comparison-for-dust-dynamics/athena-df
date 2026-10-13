@@ -332,7 +332,7 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
           return_levels=False, subsample=False, fast_restrict=False, x1_min=None,
           x1_max=None, x2_min=None, x2_max=None, x3_min=None, x3_max=None, vol_func=None,
           vol_params=None, face_func_1=None, face_func_2=None, face_func_3=None,
-          center_func_1=None, center_func_2=None, center_func_3=None, num_ghost=0):
+          center_func_1=None, center_func_2=None, center_func_3=None, num_ghost=0, **kwargs):
     """Read .athdf files and populate dict of arrays of data.
 
 
@@ -392,6 +392,7 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
         new_data = True
     else:
         new_data = False
+    new_ds = kwargs.get("update_pack", None)  # RL: for easier restrictions
 
     # Open file
     with h5py.File(filename, 'r') as f:
@@ -547,13 +548,14 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
             if num_ghost > 0:
                 raise AthenaError('Subsampling and fast restriction incompatible with'
                                   + ' ghost zones')
-            max_restrict_factor = 2**(max_level-level)
-            for current_block_size in block_size:
-                if (current_block_size != 1
-                        and current_block_size % max_restrict_factor != 0):
-                    raise AthenaError('Block boundaries at finest level must be cell'
-                                      + ' boundaries at desired level for subsampling or'
-                                      + ' fast restriction to work')
+            if new_ds is None:  # RL: disable this check if update_pack can be used
+                max_restrict_factor = 2**(max_level-level)
+                for current_block_size in block_size:
+                    if (current_block_size != 1
+                            and current_block_size % max_restrict_factor != 0):
+                        raise AthenaError('Block boundaries at finest level must be cell'
+                                        + ' boundaries at desired level for subsampling or'
+                                        + ' fast restriction to work')
 
         # Create list of all quantities if none given
         var_quantities = np.array([x.decode('ascii', 'replace')
@@ -567,7 +569,8 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
             quantities = var_quantities
         else:
             for q in quantities:
-                if q not in var_quantities and q not in coord_quantities:
+                if q not in var_quantities and q not in coord_quantities \
+                        and not (new_ds is not None and q in new_ds):  # RL: derived by the caller
                     possibilities = '", "'.join(var_quantities)
                     possibilities = '"' + possibilities + '"'
                     error_string = ('Quantity not recognized: file does not include "{0}"'
@@ -591,6 +594,10 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
         quantity_datasets = []
         quantity_indices = []
         for q in quantities:
+            if q not in variable_names:  # RL: only in update_pack (checked above)
+                quantity_datasets.append(None)
+                quantity_indices.append(None)
+                continue
             var_num = np.where(variable_names == q)[0][0]
             dataset_num = np.where(dataset_sizes_cumulative > var_num)[0][0]
             if dataset_num == 0:
@@ -619,7 +626,7 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
             if nx == 1:
                 xm = (x1m, x2m, x3m)[d-1]
                 xp = (x1p, x2p, x3p)[d-1]
-                data[xf] = np.array([xm, xp])
+                data[xf] = np.array([xm, xp])#, dtype=dtype)
             else:
                 xmin = f.attrs['RootGridX' + repr(d)][0]
                 xmax = f.attrs['RootGridX' + repr(d)][1]
@@ -633,7 +640,7 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
                     data[xf] = face_func(xmin, xmax, xrat_root, nx+1)
                 elif xrat_root == 1.0:
                     if np.all(levels == level):
-                        data[xf] = np.empty(nx + 1)
+                        data[xf] = np.empty(nx + 1)#, dtype=dtype)
                         for n_block in range(int((nx - 2*num_ghost)
                                                  // (block_size[d-1] - 2*num_ghost))):
                             sample_block = np.where(logical_locations[:, d-1]
@@ -645,17 +652,32 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
                         if num_ghost > 0:
                             raise AthenaError('Cannot use ghost zones with different'
                                               + ' refinement levels')
-                        data[xf] = np.linspace(xmin, xmax, nx + 1)
+                        data[xf] = np.linspace(xmin, xmax, nx + 1)#, dtype=dtype)
                 else:
                     if num_ghost > 0:
                         raise AthenaError('Ghost zones incompatible with non-uniform'
                                           + ' coordinate spacing')
                     xrat = xrat_root ** (1.0 / 2**level)
-                    data[xf] = (xmin + (1.0-xrat**np.arange(nx+1))
+                    data[xf] = (xmin + (1.0-xrat**np.arange(nx+1)) #, dtype=dtype
                                 / (1.0-xrat**nx) * (xmax-xmin))
-            data[xv] = np.empty(nx)
+            data[xv] = np.empty(nx)#, dtype=dtype)
             for i in range(nx):
                 data[xv][i] = center_func(data[xf][i], data[xf][i+1])
+                #if (data[xv][i] > data[xf][i+1] or data[xv][i] < data[xf][i]):
+                #    print(f"{xv} out of {xf}-bound at {i}: cc = {data[xv][i]}, face = {data[xf][i]}, {data[xf][i+1]}")
+
+        # update data set to fill in voids in coarse levels (only from +1 level)
+        if new_ds is not None:
+            try:
+                new_ds = kwargs.get("update_pack")
+                levels = new_ds['levels']
+                logical_locations = new_ds['logical_locations']
+                num_blocks = len(logical_locations)  # announce we have more blocks now
+                new_ds_flag = True  # only restrict from +1 level to avoid restriction overlap
+            except Exception as e:
+                raise RuntimeError("Failed to understand `update_pack`. ", e)
+        else:
+            new_ds_flag=False
 
         # Account for selection
         x1_select = False
@@ -769,22 +791,25 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
                 # Assign values
                 for q, dataset, index in zip(quantities, quantity_datasets,
                                              quantity_indices):
-                    block_data = f[dataset][index, block_num, :]
+                    block_data = (f[dataset][index, block_num, :] if dataset is not None
+                                  else new_ds[q][block_num])
                     if s > 1:
                         if nx1 > 1:
-                            block_data = np.repeat(block_data, s, axis=2)[:, :, il_s:iu_s]
+                            block_data = np.repeat(block_data, s, axis=2)
                         if nx2 > 1:
-                            block_data = np.repeat(block_data, s, axis=1)[:, jl_s:ju_s, :]
+                            block_data = np.repeat(block_data, s, axis=1)
                         if nx3 > 1:
-                            block_data = np.repeat(block_data, s, axis=0)[kl_s:ku_s, :, :]
-                        data[q][kl_d:ku_d, jl_d:ju_d, il_d:iu_d] = block_data
-                    else:
-                        data[q][kl_d:ku_d, jl_d:ju_d, il_d:iu_d] = block_data[kl_s:ku_s,
-                                                                              jl_s:ju_s,
-                                                                              il_s:iu_s]
+                            block_data = np.repeat(block_data, s, axis=0)
+                    data[q][kl_d:ku_d, jl_d:ju_d, il_d:iu_d] = block_data[kl_s:ku_s,
+                                                                          jl_s:ju_s,
+                                                                          il_s:iu_s]
 
             # Restrict fine data
             else:
+                # to avoid repeated restrictions, we only need data from one level higher
+                if new_ds_flag and levels[block_num] != level + 1:
+                    continue
+
                 # Calculate scale
                 s = 2 ** (block_level - level)
 
@@ -835,10 +860,19 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
                     # Assign values
                     for q, dataset, index in zip(quantities, quantity_datasets,
                                                  quantity_indices):
+                        # below implicitly check new_ds_flag
+                        if dataset is not None and block_num < f.attrs['NumMeshBlocks']:
+                            block_data = f[dataset][index, block_num, :]
+                        else:
+                            #print(f"[RL_debug]: now using extended data, levels[{block_num}]={levels[block_num]}")
+                            block_data = new_ds[q][block_num]
                         data[q][kl_d:ku_d,
                                 jl_d:ju_d,
-                                il_d:iu_d] = f[dataset][index, block_num, kl_s+o3:ku_s:s,
-                                                        jl_s+o2:ju_s:s, il_s+o1:iu_s:s]
+                                il_d:iu_d] = block_data[
+                                            #f[dataset][index, block_num, 
+                                                        kl_s+o3:ku_s:s,
+                                                        jl_s+o2:ju_s:s, 
+                                                        il_s+o1:iu_s:s]
 
                 # Apply fast (uniform Cartesian) restriction
                 elif fast_restrict:
@@ -850,12 +884,19 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
                     # Assign values
                     for q, dataset, index in zip(quantities, quantity_datasets,
                                                  quantity_indices):
+                        # below implicitly check new_ds_flag
+                        if dataset is not None and block_num < f.attrs['NumMeshBlocks']:
+                            block_data = f[dataset][index, block_num, :]
+                        else:
+                            #print(f"[RL_debug]: now using extended data, levels[{block_num}]={levels[block_num]}")
+                            block_data = new_ds[q][block_num]
                         for ko in ko_vals:
                             for jo in jo_vals:
                                 for io in io_vals:
                                     data[q][kl_d:ku_d,
                                             jl_d:ju_d,
-                                            il_d:iu_d] += f[dataset][index, block_num,
+                                            il_d:iu_d] += block_data[
+                                                         #f[dataset][index, block_num,
                                                                      kl_s+ko:ku_s:s,
                                                                      jl_s+jo:ju_s:s,
                                                                      il_s+io:iu_s:s]
@@ -876,28 +917,38 @@ def athdf(filename, raw=False, data=None, quantities=None, dtype=None, level=Non
                         j_d_vals = np.repeat(j_d_vals, s)
                     if nx3 > 1:
                         k_d_vals = np.repeat(k_d_vals, s)
-
+                    
+                    if block_num < f.attrs['NumMeshBlocks']:
+                        _x3f, _x2f, _x1f = f['x3f'][block_num], f['x2f'][block_num], f['x1f'][block_num]
+                    else:
+                        _x3f, _x2f, _x1f = new_ds['x3f'][block_num], new_ds['x2f'][block_num], new_ds['x1f'][block_num]
                     # Accumulate values
                     for k_s, k_d in zip(k_s_vals, k_d_vals):
                         if nx3 > 1:
-                            x3m = f['x3f'][block_num, k_s]
-                            x3p = f['x3f'][block_num, k_s+1]
+                            x3m = _x3f[k_s]
+                            x3p = _x3f[k_s+1]
                         for j_s, j_d in zip(j_s_vals, j_d_vals):
                             if nx2 > 1:
-                                x2m = f['x2f'][block_num, j_s]
-                                x2p = f['x2f'][block_num, j_s+1]
+                                x2m = _x2f[j_s]
+                                x2p = _x2f[j_s+1]
                             for i_s, i_d in zip(i_s_vals, i_d_vals):
                                 if nx1 > 1:
-                                    x1m = f['x1f'][block_num, i_s]
-                                    x1p = f['x1f'][block_num, i_s+1]
+                                    x1m = _x1f[i_s]
+                                    x1p = _x1f[i_s+1]
                                 vol = vol_func(x1m, x1p, x2m, x2p, x3m, x3p)
                                 for q, dataset, index in zip(quantities,
                                                              quantity_datasets,
                                                              quantity_indices):
-                                    data[q][k_d, j_d, i_d] += vol * f[dataset][index,
-                                                                               block_num,
-                                                                               k_s, j_s,
-                                                                               i_s]
+                                    # below implicitly check new_ds_flag
+                                    if dataset is not None and block_num < f.attrs['NumMeshBlocks']:
+                                        block_data = f[dataset][index, block_num, :]
+                                    else:
+                                        #print(f"[RL_debug]: now using extended data, levels[{block_num}]={levels[block_num]}")
+                                        block_data = new_ds[q][block_num]
+                                    data[q][k_d, j_d, i_d] += vol * block_data[k_s, j_s, i_s]
+                                                                    #f[dataset][index, block_num,
+                                                                    #           k_s, j_s,
+                                                                    #           i_s]
                     loc1 = (nx1 > 1) * block_location[0] // s
                     loc2 = (nx2 > 1) * block_location[1] // s
                     loc3 = (nx3 > 1) * block_location[2] // s
