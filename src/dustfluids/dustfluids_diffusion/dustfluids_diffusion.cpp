@@ -40,6 +40,8 @@ DustFluidsDiffusion::DustFluidsDiffusion(DustFluids *pdf, ParameterInput *pin) :
   int nc1 = pmb_->ncells1, nc2 = pmb_->ncells2, nc3 = pmb_->ncells3;
 
   dustfluids_diffusion_defined = false;
+  Momentum_Diffusion_Flag      = false;
+  Momentum_TimeDerivative_Flag = true;
   Diffusion_Flag = pin->GetBoolean("dust", "Diffusion_Flag");
 
   // Turn on dust diffusion
@@ -51,6 +53,9 @@ DustFluidsDiffusion::DustFluidsDiffusion(DustFluids *pdf, ParameterInput *pin) :
     }
     dustfluids_diffusion_defined = true;
     Momentum_Diffusion_Flag = pin->GetOrAddBoolean("dust", "Momentum_Diffusion_Flag", false);
+    // false drops the d(rho_d v_dif)/dt term and keeps only Pi_dif
+    Momentum_TimeDerivative_Flag = pin->GetOrAddBoolean("dust",
+                                   "Momentum_TimeDerivative_Flag", true);
   }
 
   // eddy time is set as 1.0 by default
