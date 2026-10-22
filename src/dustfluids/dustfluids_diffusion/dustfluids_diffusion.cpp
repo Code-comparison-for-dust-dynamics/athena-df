@@ -42,6 +42,7 @@ DustFluidsDiffusion::DustFluidsDiffusion(DustFluids *pdf, ParameterInput *pin) :
   dustfluids_diffusion_defined = false;
   Momentum_Diffusion_Flag      = false;
   Momentum_TimeDerivative_Flag = true;
+  Momentum_Diffusion_Order     = 1;
   Diffusion_Flag = pin->GetBoolean("dust", "Diffusion_Flag");
 
   // Turn on dust diffusion
@@ -56,6 +57,9 @@ DustFluidsDiffusion::DustFluidsDiffusion(DustFluids *pdf, ParameterInput *pin) :
     // false drops the d(rho_d v_dif)/dt term and keeps only Pi_dif
     Momentum_TimeDerivative_Flag = pin->GetOrAddBoolean("dust",
                                    "Momentum_TimeDerivative_Flag", true);
+    // 2: limited second-order reconstruction in the momentum diffusive flux
+    Momentum_Diffusion_Order = pin->GetOrAddInteger("dust",
+                               "Momentum_Diffusion_Order", 1);
   }
 
   // eddy time is set as 1.0 by default

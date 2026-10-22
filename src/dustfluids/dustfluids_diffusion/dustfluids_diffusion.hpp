@@ -36,6 +36,7 @@ class DustFluidsDiffusion {
   //bool ConstNu_Flag;                 // true or false, the flag of using the constant diffusivity of dust
   bool Momentum_Diffusion_Flag;      // true or false, the flag of momentum diffusion of dust fluids
   bool Momentum_TimeDerivative_Flag; // true or false, the flag of d(rho_d v_dif)/dt term
+  int  Momentum_Diffusion_Order;     // 1 or 2, the order of the momentum diffusive flux
 
   // True when the conserved dust momentum is rho_d (v_d + v_dif), i.e. it holds the diffusion
   // momentum diff_mom_cc, which must be removed wherever rho_d v_d is needed.
@@ -66,6 +67,9 @@ class DustFluidsDiffusion {
   // Other functions
   // Van Leer Flux Limiter on the momentum diffusions
   Real VanLeerLimiter(const Real a, const Real b);
+  // Limited reconstruction of the momentum carried by the diffusive flux
+  Real MomDiffRecon(const Real qmm, const Real qm, const Real qp, const Real qpp,
+                    const Real f);
 
   // Diffusivity
   // Set the constant dust diffusivity if DustDiffusionCoeffFunc == nullptr

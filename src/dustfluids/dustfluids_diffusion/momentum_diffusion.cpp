@@ -31,6 +31,14 @@ Real DustFluidsDiffusion::VanLeerLimiter(const Real a, const Real b) {
   return (c > 0.0) ? (2.0*c)/(a+b) : 0.0;
 }
 
+// Value on the face between qm and qp of a quantity carried by the diffusive flux f,
+// reconstructed from the upwind cell with the van Leer limiter
+Real DustFluidsDiffusion::MomDiffRecon(const Real qmm, const Real qm, const Real qp,
+                                       const Real qpp, const Real f) {
+  return (f >= 0.0) ? qm + 0.5*VanLeerLimiter(qm - qmm, qp - qm)
+                    : qp - 0.5*VanLeerLimiter(qp - qm, qpp - qp);
+}
+
 
 void DustFluidsDiffusion::DustFluidsMomentumDiffusiveFlux(const AthenaArray<Real> &prim_df,
             const AthenaArray<Real> &w, AthenaArray<Real> *df_diff_flux) {
@@ -68,6 +76,26 @@ void DustFluidsDiffusion::DustFluidsMomentumDiffusiveFlux(const AthenaArray<Real
 #pragma omp simd
         for (int i=il; i<=iu; ++i) {
           int di; Real same_sign, product;
+          // Second order: the velocities carried by F_rho_x1 are reconstructed from the
+          // upwind cell, v_x1 and the transverse fluxes are averaged onto the face
+          if (Momentum_Diffusion_Order == 2 && i >= 2 && i+1 < pmb_->ncells1) {
+            Real flx1 = x1flux(rho_id, k, j, i);
+            Real flx2 = 0.0, flx3 = 0.0;
+            if (f2) flx2 = 0.25*(x2flux(rho_id, k, j, i)   + x2flux(rho_id, k, j+1, i)
+                               + x2flux(rho_id, k, j, i-1) + x2flux(rho_id, k, j+1, i-1));
+            if (f3) flx3 = 0.25*(x3flux(rho_id, k, j, i)   + x3flux(rho_id, k+1, j, i)
+                               + x3flux(rho_id, k, j, i-1) + x3flux(rho_id, k+1, j, i-1));
+            Real v1f = 0.5*(prim_df(v1_id, k, j, i) + prim_df(v1_id, k, j, i-1));
+            for (int n=1; n<=3; ++n) {
+              int v_id = rho_id + n;
+              Real q = MomDiffRecon(prim_df(v_id, k, j, i-2), prim_df(v_id, k, j, i-1),
+                                    prim_df(v_id, k, j, i),   prim_df(v_id, k, j, i+1),
+                                    flx1);
+              Real cross = (n == 1) ? 0.0 : v1f*((n == 2) ? flx2 : flx3);
+              x1flux(v_id, k, j, i) += ((n == 1) ? 2.0 : 1.0)*flx1*q + cross;
+            }
+            continue;
+          }
 
           // v_xi * F_rho_x1, The diffusion of the i-momentum in x1 direction
           // Upwind Scheme depends on the sign of F_rho_x1
@@ -112,6 +140,26 @@ void DustFluidsDiffusion::DustFluidsMomentumDiffusiveFlux(const AthenaArray<Real
 #pragma omp simd
           for (int i=il; i<=iu; ++i) {
             int dj; Real same_sign, product;
+            // Second order, as in the i-direction
+            if (Momentum_Diffusion_Order == 2 && j >= 2 && j+1 < pmb_->ncells2) {
+              Real flx2 = x2flux(rho_id, k, j, i);
+              Real flx3 = 0.0;
+              Real flx1 = 0.25*(x1flux(rho_id, k, j, i)   + x1flux(rho_id, k, j, i+1)
+                              + x1flux(rho_id, k, j-1, i) + x1flux(rho_id, k, j-1, i+1));
+              if (f3)
+                flx3 = 0.25*(x3flux(rho_id, k, j, i)   + x3flux(rho_id, k+1, j, i)
+                           + x3flux(rho_id, k, j-1, i) + x3flux(rho_id, k+1, j-1, i));
+              Real v2f = 0.5*(prim_df(v2_id, k, j, i) + prim_df(v2_id, k, j-1, i));
+              for (int n=1; n<=3; ++n) {
+                int v_id = rho_id + n;
+                Real q = MomDiffRecon(prim_df(v_id, k, j-2, i), prim_df(v_id, k, j-1, i),
+                                      prim_df(v_id, k, j, i),   prim_df(v_id, k, j+1, i),
+                                      flx2);
+                Real cross = (n == 2) ? 0.0 : v2f*((n == 1) ? flx1 : flx3);
+                x2flux(v_id, k, j, i) += ((n == 2) ? 2.0 : 1.0)*flx2*q + cross;
+              }
+              continue;
+            }
 
             // v_xi * F_rho_x2, The diffusion of the i-momentum in x2 direction
             // Upwind Scheme depends on the sign of F_rho_x2
@@ -157,6 +205,24 @@ void DustFluidsDiffusion::DustFluidsMomentumDiffusiveFlux(const AthenaArray<Real
 #pragma omp simd
           for (int i=il; i<=iu; ++i) {
             int dk; Real same_sign, product;
+            // Second order, as in the i-direction
+            if (Momentum_Diffusion_Order == 2 && k >= 2 && k+1 < pmb_->ncells3) {
+              Real flx3 = x3flux(rho_id, k, j, i);
+              Real flx1 = 0.25*(x1flux(rho_id, k, j, i)   + x1flux(rho_id, k, j, i+1)
+                              + x1flux(rho_id, k-1, j, i) + x1flux(rho_id, k-1, j, i+1));
+              Real flx2 = 0.25*(x2flux(rho_id, k, j, i)   + x2flux(rho_id, k, j+1, i)
+                              + x2flux(rho_id, k-1, j, i) + x2flux(rho_id, k-1, j+1, i));
+              Real v3f = 0.5*(prim_df(v3_id, k, j, i) + prim_df(v3_id, k-1, j, i));
+              for (int n=1; n<=3; ++n) {
+                int v_id = rho_id + n;
+                Real q = MomDiffRecon(prim_df(v_id, k-2, j, i), prim_df(v_id, k-1, j, i),
+                                      prim_df(v_id, k, j, i),   prim_df(v_id, k+1, j, i),
+                                      flx3);
+                Real cross = (n == 3) ? 0.0 : v3f*((n == 1) ? flx1 : flx2);
+                x3flux(v_id, k, j, i) += ((n == 3) ? 2.0 : 1.0)*flx3*q + cross;
+              }
+              continue;
+            }
 
             // v_xi * F_rho_x3, The diffusion of the i-momentum in x3 direction
             // Upwind Scheme depends on the sign of F_rho_x3
